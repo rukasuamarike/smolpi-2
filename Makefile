@@ -11,19 +11,24 @@ REG_IMAGE   := localhost:$(REG_PORT)/$(IMAGE_NAME):$(FULL_TAG)
 VM_NAME     := pi-agent-dev
 
 # ── Build ────────────────────────────────────────────────────
-.PHONY: doctor setup build build-go run pack clean test-chromium test-go-binary test-tar test-smol-net \
+.PHONY: doctor setup setup-extensions build build-go run pack clean test-chromium test-go-binary test-tar test-smol-net \
         registry-up registry-down machine-up machine-init machine-snapshot machine-down test-brain machine-exec machine-run
 
 # ── Setup / Doctor ───────────────────────────────────────────
 doctor:          ## Preflight: check tools, llama.cpp, model, brain, VM — with fixes
 	@bash scripts/doctor.sh
 
-setup:           ## Fetch the llama.cpp submodule (then build it — see `make doctor`)
-	git submodule update --init --recursive llama.cpp
+setup:           ## Fetch all submodules + wire extension shims (run before first boot)
+	git submodule update --init --recursive
 	@mkdir -p models
+	@command -v bun >/dev/null 2>&1 && bun install \
+		|| echo "⚠ bun not on host — install bun then run 'bun install' to wire extension shims"
 	@echo "Next: build llama-server (GPU example):"
 	@echo "  cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON && cmake --build llama.cpp/build -j --target llama-server"
 	@echo "Then drop a .gguf into ./models/ and run 'make doctor'."
+
+setup-extensions: ## (re)wire the extension compat shims into node_modules
+	bun install
 
 build:
 	docker buildx build --platform linux/$(ARCH) \

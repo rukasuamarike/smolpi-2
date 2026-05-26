@@ -4,11 +4,26 @@
   "workspaces": {
     "": {
       "dependencies": {
+        "@earendil-works/pi-ai": "file:shims/earendil-pi-ai",
+        "@earendil-works/pi-tui": "file:shims/earendil-pi-tui",
+        "@mariozechner/pi-coding-agent": "file:shims/mariozechner-pi-coding-agent",
         "@sinclair/typebox": "^0.34.49",
+        "better-sqlite3": "file:shims/better-sqlite3",
+        "typebox": "file:shims/typebox",
       },
     },
   },
   "packages": {
+    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@file:shims/earendil-pi-ai", {}],
+
+    "@earendil-works/pi-tui": ["@earendil-works/pi-tui@file:shims/earendil-pi-tui", {}],
+
+    "@mariozechner/pi-coding-agent": ["@mariozechner/pi-coding-agent@file:shims/mariozechner-pi-coding-agent", {}],
+
     "@sinclair/typebox": ["@sinclair/typebox@0.34.49", "", {}, "sha512-brySQQs7Jtn0joV8Xh9ZV/hZb9Ozb0pmazDIASBkYKCjXrXU3mpcFahmK/z4YDhGkQvP9mWJbVyahdtU5wQA+A=="],
+
+    "better-sqlite3": ["better-sqlite3@file:shims/better-sqlite3", {}],
+
+    "typebox": ["typebox@file:shims/typebox", {}],
   }
 }

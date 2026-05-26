@@ -52,6 +52,14 @@ COPY --from=go-builder /browser_skill /usr/local/bin/browser_skill
 WORKDIR /app
 COPY agent/ ./agent/
 
+# Bake the persona, extensions, and their compat shims into the image so the
+# packed MicroVM is self-contained (the dev flow mounts these instead — Smolfile).
+COPY .pi/ ./.pi/
+COPY shims/ ./shims/
+COPY extensions/ ./extensions/
+COPY package.json bun.lock ./
+RUN bun install --ignore-scripts || echo "WARN: extension shim install failed; base agent still runs"
+
 # Shell config for agent-friendly terminal
 RUN echo 'eval "$(zoxide init bash)"' >> /root/.bashrc && \
     echo 'export CHROME_BIN=/usr/bin/chromium' >> /root/.bashrc && \

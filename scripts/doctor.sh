@@ -16,7 +16,7 @@ have smolvm && ok "smolvm" || bad "smolvm missing" "install Smolmachines (see HO
 have docker && ok "docker" || bad "docker missing" "install Docker + buildx (see HOST_SETUP.md)"
 have git    && ok "git"    || bad "git missing" "install git"
 have go     && ok "go $(go version 2>/dev/null | awk '{print $3}')" || warn "go missing" "only needed for 'make build-go' (browser skill); the OCI image build doesn't use host go"
-have bun    && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "only needed to run the agent OUTSIDE the VM; the guest installs bun via 'make machine-init'"
+have bun    && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "needed for 'make setup' (bun install wires extension shims, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"
 
 echo "── brain: llama.cpp ──"
 if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else bad "llama.cpp submodule empty" "make setup   (git submodule update --init llama.cpp)"; fi
@@ -60,6 +60,19 @@ fi
 echo "── guest VM ──"
 if smolvm machine ls 2>/dev/null | grep -q 'pi-agent-dev'; then ok "VM 'pi-agent-dev' exists"; else warn "no VM yet" "make machine-up && make machine-init && make machine-snapshot"; fi
 grep -q '\.pi:/app/\.pi' Smolfile 2>/dev/null && ok "Smolfile mounts ./.pi (soul + extension config reach the guest)" || warn ".pi not mounted in Smolfile" "add \"./.pi:/app/.pi:ro\" to [dev].volumes so APPEND_SYSTEM.md / extensions.json load in the guest"
+
+echo "── extensions (optional) ──"
+if [ -f .pi/extensions.json ] && grep -q '"enabled": true' .pi/extensions.json 2>/dev/null; then
+  if [ -e node_modules/@sinclair/typebox/package.json ] && [ -e node_modules/better-sqlite3/package.json ]; then
+    ok "extension compat shims installed (memory/wiki tools will load)"
+  else
+    warn "extensions enabled but shims not installed" "run 'make setup' (or 'bun install') to wire the compat shims"
+  fi
+  [ -n "$(ls -A extensions/memctx 2>/dev/null)" ] && ok "extension submodules populated" || warn "extension submodules empty" "make setup  (git submodule update --init)"
+  grep -q 'extensions:/app/extensions' Smolfile 2>/dev/null && ok "Smolfile mounts ./extensions + node_modules" || warn "extensions not mounted to guest" "add ./extensions and ./node_modules to Smolfile [dev].volumes"
+else
+  ok "no extensions enabled (base agent only)"
+fi
 
 echo
 echo "summary: ${PASS} ok · ${WARN} warnings · ${FAIL} failures"

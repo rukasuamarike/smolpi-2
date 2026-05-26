@@ -1,5 +1,12 @@
 {
+  "name": "pi-agent-smol",
+  "private": true,
   "dependencies": {
-    "@sinclair/typebox": "^0.34.49"
+    "@sinclair/typebox": "^0.34.49",
+    "typebox": "file:shims/typebox",
+    "better-sqlite3": "file:shims/better-sqlite3",
+    "@earendil-works/pi-ai": "file:shims/earendil-pi-ai",
+    "@earendil-works/pi-tui": "file:shims/earendil-pi-tui",
+    "@mariozechner/pi-coding-agent": "file:shims/mariozechner-pi-coding-agent"
   }
 }

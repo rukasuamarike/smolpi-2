@@ -37,10 +37,11 @@ on an iPhone.
 > prerequisite and prints the exact fix.
 
 ```bash
-# 0. Prereqs: smolvm, docker (+buildx), git, go.  (bun is auto-installed in the guest.)
+# 0. Prereqs: smolvm, docker (+buildx), git, go, bun.
+#    (bun on the host wires the extension shims; the guest also installs its own.)
 
-# 1. Fetch the brain source + make a models dir
-make setup                       # git submodule update --init llama.cpp
+# 1. Fetch submodules (brain + extensions) and wire extension shims; makes ./models
+make setup                       # git submodule update --init --recursive + bun install
 
 # 2. Build llama-server for your GPU (CUDA example; see HOST_SETUP.md for Metal/Vulkan/CPU)
 cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON
@@ -94,10 +95,12 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
   shell commands are timeout-bounded, and context is trimmed to fit the window.
 
 ### Extensions, soul & logs (experimental)
-- **Memory/knowledge extensions** are vendored under `extensions/` and toggled in
-  [`.pi/extensions.json`](./.pi/extensions.json) (deny-by-default). They give the agent model-callable
-  memory: `pi-memctx` (local-markdown recall), `pi-hermes-memory` (cross-session facts), and
-  `@zosmaai/pi-llm-wiki` (a knowledge vault). See [`docs/EXTENSION_REVIEW.md`](./docs/EXTENSION_REVIEW.md).
+- **Memory/knowledge extensions** are vendored under `extensions/` (git submodules) and toggled in
+  [`.pi/extensions.json`](./.pi/extensions.json). They give the agent model-callable memory: `pi-memctx`
+  (local-markdown recall), `pi-hermes-memory` (cross-session facts), and `@zosmaai/pi-llm-wiki` (a
+  knowledge vault). These are written for the pi.dev runtime; smolpi loads them through a small compat
+  host using tracked shims under `shims/` (wired by `make setup` / `bun install`). `make doctor` verifies
+  they're installed. See [`docs/EXTENSION_REVIEW.md`](./docs/EXTENSION_REVIEW.md).
 - **Soul / persona** — drop persona text into `.pi/APPEND_SYSTEM.md`; it's appended to the system prompt.
 - **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages
   (post-processable into training data). `/logs` summarizes token efficiency.
