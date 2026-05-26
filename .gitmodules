@@ -1,3 +1,18 @@
 [submodule "llama.cpp"]
 	path = llama.cpp
 	url = https://github.com/ggerganov/llama.cpp.git
+[submodule "extensions/memctx"]
+	path = extensions/memctx
+	url = https://github.com/weauratech/pi-memctx.git
+[submodule "extensions/hermes-memory"]
+	path = extensions/hermes-memory
+	url = https://github.com/chandra447/pi-hermes-memory.git
+[submodule "extensions/delegate"]
+	path = extensions/delegate
+	url = https://codeberg.org/drsh4dow/pi-delegate.git
+[submodule "extensions/share-redacted-gist"]
+	path = extensions/share-redacted-gist
+	url = https://github.com/lukaskawerau/pi-share-redacted-gist.git
+[submodule "extensions/llm-wiki"]
+	path = extensions/llm-wiki
+	url = https://github.com/zosmaai/pi-llm-wiki.git

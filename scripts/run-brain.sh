@@ -38,6 +38,10 @@ fi
 
 echo "Found: $LLAMA_SERVER"
 
+# Co-locate shared libs with the binary. Handles a relocated build whose baked
+# RUNPATH points at a stale absolute path (e.g. after moving the tree).
+export LD_LIBRARY_PATH="$(cd "$(dirname "$LLAMA_SERVER")" && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # ── Select a GGUF model ─────────────────────────────────────
 if [[ ! -d "$MODELS_DIR" ]]; then
     echo "ERROR: No $MODELS_DIR directory found."

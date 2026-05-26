@@ -1,0 +1,8 @@
+{
+  "_comment": "Measurement config: memctx only (hermes-memory disabled). Used to isolate combined-vs-single memory token cost.",
+  "policy": { "denyByDefault": true, "allowExperimental": false, "allowEgress": false, "maxInjectedContextChars": 6000 },
+  "extensions": {
+    "memctx": { "path": "../extensions/memctx", "tier": "stable", "enabled": true },
+    "hermes-memory": { "path": "../extensions/hermes-memory", "tier": "stable", "enabled": false }
+  }
+}

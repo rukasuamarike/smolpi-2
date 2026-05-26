@@ -1,0 +1,42 @@
+{
+  "name": "pi-thread-engine",
+  "version": "0.4.7",
+  "description": "Thread-Based Engineering for pi — all 7 thread types + stories + fusion + zero-touch + TUI dashboard. Based on @IndyDevDan framework from agenticengineer.com.",
+  "type": "module",
+  "license": "MIT",
+  "author": "artale",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arosstale/pi-threads"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "threads",
+    "thread-engineering",
+    "multi-agent",
+    "fusion",
+    "orchestration"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "files": [
+    "extensions/",
+    "src/",
+    "README.md",
+    "PLAN.md",
+    "docs/"
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.73.0",
+    "@mariozechner/pi-tui": ">=0.73.0",
+    "@mariozechner/pi-ai": ">=0.73.0",
+    "@sinclair/typebox": "^0.34.48"
+  }
+}

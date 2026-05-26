@@ -1,0 +1,49 @@
+{
+  "_comment": "Toggle registry for pi.dev extensions vendored under ../extensions. Deny-by-default (rubric #8/#10). Tiers: stable (L3, tested) | experimental (gate hard) | egress (publishes off-machine; command-only, never autorun). See docs/EXTENSION_REVIEW.md.",
+  "policy": {
+    "denyByDefault": true,
+    "allowExperimental": false,
+    "allowEgress": false,
+    "maxInjectedContextChars": 6000
+  },
+  "extensions": {
+    "memctx": {
+      "path": "../extensions/memctx",
+      "tier": "stable",
+      "enabled": true,
+      "note": "HIGH ctx-efficient memory. Best first port. ENABLED."
+    },
+    "hermes-memory": {
+      "path": "../extensions/hermes-memory",
+      "tier": "stable",
+      "enabled": true,
+      "note": "HIGH cross-session facts/skills. Staged alongside memctx. ENABLED."
+    },
+    "delegate": {
+      "path": "../extensions/delegate",
+      "tier": "stable",
+      "enabled": false,
+      "note": "Subagent isolation. Needs the multi-step loop fix in index.ts first."
+    },
+    "llm-wiki": {
+      "path": "../extensions/llm-wiki",
+      "tier": "stable",
+      "enabled": true,
+      "note": "Research-org vault + model-callable recall/search/capture tools. ENABLED."
+    },
+    "thread-engine": {
+      "path": "../extensions/thread-engine",
+      "tier": "experimental",
+      "enabled": false,
+      "options": { "allowedThreadTypes": ["parallel", "checkpoint"] },
+      "note": "GATE HARD: dead upstream repo, no tests, ungated Z/L autonomy. Never enable zero-touch/long-running without an approval gate."
+    },
+    "share-redacted-gist": {
+      "path": "../extensions/share-redacted-gist",
+      "tier": "egress",
+      "enabled": false,
+      "commandOnly": true,
+      "note": "Publishes redacted sessions to GitHub Gist / HF (irreversible). Manual command only; never autorun."
+    }
+  }
+}

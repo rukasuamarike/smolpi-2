@@ -22,4 +22,5 @@ volumes = [
     "./browser:/app/browser",
     "./bin:/app/bin:ro",
     "./scripts:/app/scripts:ro",
+    "./.pi:/app/.pi:ro",
 ]

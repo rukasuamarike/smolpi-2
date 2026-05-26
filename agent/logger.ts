@@ -1,0 +1,115 @@
+// Session logger + token-efficiency benchmarking.
+// Every LLM call is appended as one JSONL record to ~/.pi/agent/logs/<session>.jsonl.
+// Each record carries the real token usage from llama-server's `usage` field, the
+// active extension config, and (unless LOG_MESSAGES=0) the messages sent + reply —
+// which makes every line an SFT-ready (input → output) sample for post-training the
+// model later. `/logs` summarizes token efficiency for the session and over time.
+import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+const LOG_DIR = process.env.PI_LOG_DIR ?? join(homedir(), ".pi", "agent", "logs");
+
+export interface Usage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+}
+
+interface Rec {
+  ts: string; session: string; config: string; tag: string; turn: number; step: number; model: string;
+  prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens: number;
+  system_chars: number; injected_chars: number; latency_ms: number;
+  messages?: { role: string; content: string }[];
+  reply?: string;
+}
+
+export class SessionLogger {
+  readonly session = new Date().toISOString().replace(/[:.]/g, "-");
+  private file = join(LOG_DIR, `${this.session}.jsonl`);
+  private recs: Rec[] = [];
+  private withMessages = process.env.LOG_MESSAGES !== "0"; // default ON → post-training data
+
+  constructor(private extensions: string[]) {}
+  get config(): string { return this.extensions.length ? this.extensions.join("+") : "none"; }
+
+  async log(p: {
+    turn: number; step: number; model: string; usage: Usage; latencyMs: number;
+    systemChars: number; baseChars: number;
+    messages: { role: string; content: string }[]; reply: string; tag?: string;
+  }): Promise<void> {
+    const rec: Rec = {
+      ts: new Date().toISOString(), session: this.session, config: this.config,
+      tag: p.tag ?? "main",
+      turn: p.turn, step: p.step, model: p.model,
+      prompt_tokens: p.usage.prompt_tokens ?? 0,
+      completion_tokens: p.usage.completion_tokens ?? 0,
+      total_tokens: p.usage.total_tokens ?? 0,
+      cached_tokens: p.usage.prompt_tokens_details?.cached_tokens ?? 0,
+      system_chars: p.systemChars,
+      injected_chars: Math.max(0, p.systemChars - p.baseChars),
+      latency_ms: Math.round(p.latencyMs),
+    };
+    if (this.withMessages) { rec.messages = p.messages; rec.reply = p.reply; }
+    this.recs.push(rec);
+    try {
+      await mkdir(LOG_DIR, { recursive: true });
+      await appendFile(this.file, JSON.stringify(rec) + "\n");
+    } catch {
+      // Logging must never break the agent.
+    }
+  }
+
+  sessionSummary(): string {
+    if (!this.recs.length) return "no LLM calls logged this session";
+    const n = this.recs.length;
+    const sum = (k: "prompt_tokens" | "completion_tokens" | "latency_ms") =>
+      this.recs.reduce((a, r) => a + r[k], 0);
+    const p = sum("prompt_tokens"), c = sum("completion_tokens"), lat = sum("latency_ms");
+    const inj = this.recs[0].injected_chars;
+    return [
+      `── /logs · session ${this.session} · config: ${this.config} ──`,
+      `LLM calls:         ${n}`,
+      `prompt tokens:     ${p} total  (${Math.round(p / n)} avg/call)`,
+      `completion tokens: ${c} total  (${Math.round(c / n)} avg/call)`,
+      `injected memory:   ~${inj} chars in system prompt (~${Math.round(inj / 4)} tokens)`,
+      `avg latency:       ${Math.round(lat / n)} ms/call`,
+      `log file:          ${this.file}`,
+    ].join("\n");
+  }
+
+  /** Aggregate avg prompt tokens per call grouped by extension config, across
+   *  all logged sessions — the token-efficiency trend over time. */
+  static async allTimeSummary(): Promise<string> {
+    let files: string[] = [];
+    try { files = (await readdir(LOG_DIR)).filter((f) => f.endsWith(".jsonl")); }
+    catch { return "no logs yet"; }
+
+    const byConfig = new Map<string, { calls: number; prompt: number; completion: number; sessions: Set<string> }>();
+    for (const f of files) {
+      let lines: string[] = [];
+      try { lines = (await readFile(join(LOG_DIR, f), "utf8")).trim().split("\n").filter(Boolean); }
+      catch { continue; }
+      for (const line of lines) {
+        let r: Rec;
+        try { r = JSON.parse(line); } catch { continue; }
+        const g = byConfig.get(r.config) ?? { calls: 0, prompt: 0, completion: 0, sessions: new Set<string>() };
+        g.calls++; g.prompt += r.prompt_tokens; g.completion += r.completion_tokens; g.sessions.add(r.session);
+        byConfig.set(r.config, g);
+      }
+    }
+    if (!byConfig.size) return "no logs yet";
+    const rows = [...byConfig.entries()]
+      .sort((a, b) => a[1].prompt / a[1].calls - b[1].prompt / b[1].calls)
+      .map(([cfg, g]) =>
+        `  ${cfg.padEnd(26)} ${String(g.calls).padStart(4)} calls  ` +
+        `${String(Math.round(g.prompt / g.calls)).padStart(5)} avg prompt-tok  ` +
+        `${String(Math.round(g.completion / g.calls)).padStart(4)} avg compl-tok  (${g.sessions.size} sessions)`);
+    return [
+      "── token efficiency over time · avg prompt tokens/call by config ──",
+      ...rows,
+      "(lower avg prompt-tok for the same task = more ctx-efficient; each JSONL line is an SFT-ready record)",
+    ].join("\n");
+  }
+}

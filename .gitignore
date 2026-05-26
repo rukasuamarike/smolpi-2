@@ -5,3 +5,8 @@ pi-agent.smolmachine
 node_modules/
 bin/
 .pi/APPEND_SYSTEM.md
+# Large model weights — download locally, never commit (see README / `make doctor`)
+models/
+*.gguf
+# Local runtime state
+.pi/umi_profile.json
