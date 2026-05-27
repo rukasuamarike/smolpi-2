@@ -34,10 +34,10 @@ fi
 [ -n "$(ls -A smolvm 2>/dev/null)" ] && ok "smolvm submodule populated (vendored source)" || warn "smolvm submodule empty" "make setup  (vendored runtime source; needed only to build smolvm from source)"
 
 echo "── brain: llama.cpp ──"
-if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else bad "llama.cpp submodule empty" "make setup   (git submodule update --init llama.cpp)"; fi
+if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else warn "llama.cpp submodule empty" "only needed to BUILD llama-server here; fine if you use ~/smolpi's build or a system one. populate: make setup"; fi
 
 LS=""
-for p in ./llama.cpp/build/bin/llama-server ./llama.cpp/llama-server "$(command -v llama-server 2>/dev/null || true)" /usr/local/bin/llama-server; do
+for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server ./llama.cpp/llama-server "$(command -v llama-server 2>/dev/null || true)" /usr/local/bin/llama-server "$HOME/smolpi/llama.cpp/build/bin/llama-server"; do
   [ -n "$p" ] && [ -x "$p" ] && LS="$p" && break
 done
 if [ -n "$LS" ]; then
@@ -59,10 +59,13 @@ else
 fi
 
 echo "── brain: model ──"
-if ls models/*.gguf >/dev/null 2>&1; then
-  ok "model(s): $(ls models/*.gguf | xargs -n1 basename | tr '\n' ' ')"
+MODELS_DIR="${MODELS_DIR:-./models}"
+if ls "$MODELS_DIR"/*.gguf >/dev/null 2>&1; then
+  ok "model(s) in $MODELS_DIR: $(ls "$MODELS_DIR"/*.gguf | xargs -n1 basename | tr '\n' ' ')"
+elif ls "$HOME"/smolpi/models/*.gguf >/dev/null 2>&1; then
+  ok "model(s) in ~/smolpi/models: $(ls "$HOME"/smolpi/models/*.gguf | xargs -n1 basename | tr '\n' ' ')"
 else
-  bad "no .gguf in ./models" "mkdir -p models && download a Gemma gguf into it (see README → Get a model)"
+  bad "no .gguf in $MODELS_DIR or ~/smolpi/models" "drop a Gemma gguf into ./models (see README → Get a model), or set MODELS_DIR=…"
 fi
 
 echo "── brain: reachable ──"

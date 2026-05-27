@@ -4,14 +4,16 @@ set -euo pipefail
 PORT="${PORT:-8080}"
 HOST="0.0.0.0"
 CTX_SIZE="${CTX_SIZE:-4096}"
-MODELS_DIR="./models"
+MODELS_DIR="${MODELS_DIR:-./models}"
 
 # ── Locate llama-server ──────────────────────────────────────
 SEARCH_PATHS=(
+    "${LLAMA_SERVER:-}"
     "./llama.cpp/build/bin/llama-server"
     "./llama.cpp/llama-server"
     "$(command -v llama-server 2>/dev/null || true)"
     "/usr/local/bin/llama-server"
+    "$HOME/smolpi/llama.cpp/build/bin/llama-server"
 )
 
 LLAMA_SERVER=""
@@ -42,21 +44,19 @@ echo "Found: $LLAMA_SERVER"
 # RUNPATH points at a stale absolute path (e.g. after moving the tree).
 export LD_LIBRARY_PATH="$(cd "$(dirname "$LLAMA_SERVER")" && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# ── Select a GGUF model ─────────────────────────────────────
-if [[ ! -d "$MODELS_DIR" ]]; then
-    echo "ERROR: No $MODELS_DIR directory found."
-    echo "Create it and place .gguf files inside:"
-    echo "  mkdir -p $MODELS_DIR"
-    exit 1
+# ── Select a GGUF model (MODELS_DIR, else ~/smolpi/models) ───
+mapfile -t MODELS < <(find "$MODELS_DIR" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null | sort)
+if [[ ${#MODELS[@]} -eq 0 && -d "$HOME/smolpi/models" ]]; then
+    echo "No .gguf in $MODELS_DIR — falling back to ~/smolpi/models"
+    MODELS_DIR="$HOME/smolpi/models"
+    mapfile -t MODELS < <(find "$MODELS_DIR" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null | sort)
 fi
 
-mapfile -t MODELS < <(find "$MODELS_DIR" -maxdepth 1 -name '*.gguf' -type f | sort)
-
 if [[ ${#MODELS[@]} -eq 0 ]]; then
-    echo "ERROR: No .gguf files found in $MODELS_DIR/"
+    echo "ERROR: No .gguf files found in $MODELS_DIR/ (and no ~/smolpi/models)"
     echo ""
-    echo "Download one, e.g.:"
-    echo "  curl -L -o $MODELS_DIR/gemma-2-2b-Q4_K_M.gguf \\"
+    echo "Drop a .gguf into ./models/ or set MODELS_DIR=…, e.g.:"
+    echo "  curl -L -o ./models/gemma-2-2b-Q4_K_M.gguf \\"
     echo '    "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf"'
     exit 1
 fi
