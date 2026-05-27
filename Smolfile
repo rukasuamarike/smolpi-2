@@ -12,16 +12,13 @@ env = [
     "DEBIAN_FRONTEND=noninteractive",
     "LLM_URL=http://127.0.0.1:8080",
     "LLM_MODEL=gemma-4",
-    "BROWSER_BIN=/app/bin/browser_skill",
-    "CHROME_BIN=/usr/bin/chromium",
+    "BROWSER_BIN=browser39",
     "WIKI_HOME=/root",
 ]
 
 [dev]
 volumes = [
     "./agent:/app/agent",
-    "./browser:/app/browser",
-    "./bin:/app/bin:ro",
     "./scripts:/app/scripts:ro",
     "./.pi:/app/.pi:ro",
     # Extensions + their compat shims (run `make setup` on the host first).

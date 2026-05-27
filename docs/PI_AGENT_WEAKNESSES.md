@@ -3,7 +3,7 @@
 Scored against [`HARNESS_RUBRIC.md`](~/study/notes/HARNESS_RUBRIC.md) (the 10-dimension ladder distilled
 from `~/study/notes`). Focus axes you named: **latency**, **complex coding/debug**, **high-level research
 organization**. Evidence cites the actual source (`agent/index.ts`, `agent/capabilities.ts`,
-`browser/browser_skill.go`, `scripts/run-brain.sh`, `Smolfile`).
+`browser39` (the in-guest Rust browser binary, formerly `browser/browser_skill.go`), `scripts/run-brain.sh`, `Smolfile`).
 
 > Framing: *the model is the engine; the harness is the car.* smolpi is a deliberately minimal car
 > (~167-line `index.ts`). The point of this audit is not "it's small" — it's to locate the specific
@@ -42,8 +42,8 @@ organization**. Evidence cites the actual source (`agent/index.ts`, `agent/capab
   through a session until the window overflows.
 - **No span tracing.** Only final text is logged (`index.ts:158,160`); you cannot see whether wall-clock
   is model vs tool vs wait — so there's nothing to optimize against. **This is the cheapest L1→L2 win.**
-- **Unbounded shell wait.** `shell()` (`index.ts:94`) has **no timeout** (unlike `browse()`'s 30 s in
-  `browser_skill.go`); a command that blocks on stdin hangs the whole agent indefinitely.
+- **Unbounded shell wait.** `shell()` (`index.ts:94`) has **no timeout** (unlike `browse()`'s 30 s, now
+  enforced by the in-guest `browser39` binary, formerly `browser/browser_skill.go`); a command that blocks on stdin hangs the whole agent indefinitely.
 
 ## Axis 2 — Complex coding / debug (rubric #2,4,5: ~L0)
 

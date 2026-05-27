@@ -2,6 +2,7 @@
   "name": "pi-agent-smol",
   "private": true,
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
     "@sinclair/typebox": "^0.34.49",
     "typebox": "file:shims/typebox",
     "better-sqlite3": "file:shims/better-sqlite3",

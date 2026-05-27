@@ -12,19 +12,12 @@ Linux/WSL2 sections cover smolvm, libkrun, etc. Mac users primarily need section
 
 ---
 
-## 1. Go 1.22+
+## 1. Browser — nothing to install on the host
 
-Needed to compile `browser_skill` on the host — `make build-go` cross-compiles it to `./bin/`, which the Smolfile mounts into the guest.
-
-```bash
-GO_VERSION=1.22.5
-curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | sudo tar -C /usr/local -xz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-source ~/.bashrc
-
-# Verify
-go version
-```
+The "Eyes" used to be a Go binary you cross-compiled on the host (`make build-go`) that shelled out to
+headless Chromium. That's gone: the browser is now [`browser39`](https://github.com/alejandroqh/browser39),
+a single Rust binary installed **inside the guest** by `guest-setup.sh` (`bun add -g @aquintanar/browser39`).
+No host Go toolchain, no Chromium, no system libs. Skip straight to Bun.
 
 ---
 

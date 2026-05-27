@@ -4,14 +4,9 @@ set -e
 echo "[1/5] Updating apt..."
 apt-get update
 
-echo "[2/5] Installing packages..."
+echo "[2/5] Installing packages... (no Chromium — browser39 replaces it, see below)"
 apt-get install -y --no-install-recommends \
     ca-certificates curl unzip \
-    chromium \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
-    libxrandr2 libgbm1 libasound2 libpango-1.0-0 \
-    libcairo2 \
     neovim fzf ripgrep btop haveged \
     bat fd-find jq \
     cowsay sl
@@ -27,6 +22,12 @@ echo "[3.5/5] Installing zoxide..."
 if ! command -v zoxide >/dev/null 2>&1; then
     curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
     [ -x /root/.local/bin/zoxide ] && ln -sf /root/.local/bin/zoxide /usr/local/bin/zoxide
+fi
+
+echo "[3.7/5] Installing browser39 (Rust single binary, no Chromium)..."
+if ! command -v browser39 >/dev/null 2>&1; then
+    bun add -g @aquintanar/browser39 || echo "WARN: browser39 install failed; <browse> + MCP browser tools will be unavailable"
+    [ -x /root/.bun/bin/browser39 ] && ln -sf /root/.bun/bin/browser39 /usr/local/bin/browser39
 fi
 
 echo "[4/5] Linking Debian-renamed binaries..."
@@ -66,7 +67,7 @@ grep -q '\.bashrc\.smol' /root/.bashrc 2>/dev/null || \
 
 echo "[5/5] Verifying..."
 printf "  %-15s %s\n" "bun:"           "$(bun --version 2>/dev/null || echo 'MISSING')"
-printf "  %-15s %s\n" "chromium:"      "$(command -v chromium || echo 'MISSING')"
+printf "  %-15s %s\n" "browser39:"     "$(browser39 --version 2>/dev/null || command -v browser39 || echo 'MISSING')"
 printf "  %-15s %s\n" "rg:"            "$(rg --version 2>/dev/null | head -1 || echo 'MISSING')"
 printf "  %-15s %s\n" "fd:"            "$(fd --version 2>/dev/null || echo 'MISSING')"
 printf "  %-15s %s\n" "bat:"           "$(bat --version 2>/dev/null || echo 'MISSING')"
@@ -77,7 +78,6 @@ printf "  %-15s %s\n" "nvim:"          "$(nvim --version 2>/dev/null | head -1 |
 printf "  %-15s %s\n" "btop:"          "$(command -v btop || echo 'MISSING')"
 printf "  %-15s %s\n" "cowsay:"        "$(command -v cowsay || echo 'MISSING')"
 printf "  %-15s %s\n" "sl:"            "$(command -v sl || echo 'MISSING')"
-printf "  %-15s %s\n" "browser_skill:" "$(ls /app/bin/browser_skill 2>/dev/null || echo 'MISSING')"
 printf "  %-15s %s\n" "agent:"         "$(ls /app/agent/index.ts 2>/dev/null || echo 'MISSING')"
 echo ""
 echo "Guest setup complete. Open a new shell or 'source ~/.bashrc' to pick up env changes."

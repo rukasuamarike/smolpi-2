@@ -24,8 +24,7 @@ else
 fi
 have git     && ok "git"     || bad "git missing" "install git"
 have git-lfs && ok "git-lfs" || warn "git-lfs missing" "smolvm/llama.cpp submodules ship libs via LFS; without it 'make setup' leaves them as pointer files. install: sudo apt install git-lfs && git lfs install"
-have go      && ok "go $(go version 2>/dev/null | awk '{print $3}')" || warn "go missing" "only needed for 'make build-go' (browser skill)"
-have bun     && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "needed for 'make setup' (bun install wires extension shims, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"
+have bun     && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "needed for 'make setup' (bun install wires extension shims + the MCP SDK, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"
 # smolvm's linux release links GPU-enabled libkrun → libvirglrenderer needed at load time (CLI + packed binaries)
 if ldconfig -p 2>/dev/null | grep -q 'libvirglrenderer\.so\.1'; then
   ok "libvirglrenderer (libkrun runtime dep)"
@@ -88,6 +87,17 @@ if [ -f .pi/extensions.json ] && grep -q '"enabled": true' .pi/extensions.json 2
   grep -q 'extensions:/app/extensions' Smolfile 2>/dev/null && ok "Smolfile mounts ./extensions + node_modules" || warn "extensions not mounted to guest" "add ./extensions and ./node_modules to Smolfile [dev].volumes"
 else
   ok "no extensions enabled (base agent only)"
+fi
+
+echo "── MCP bridge (optional) ──"
+if [ -f .pi/mcp.json ] && grep -q '"mcpServers"' .pi/mcp.json 2>/dev/null; then
+  if [ -e node_modules/@modelcontextprotocol/sdk/package.json ]; then
+    ok "MCP bridge ready (.pi/mcp.json + @modelcontextprotocol/sdk installed)"
+  else
+    warn "mcp.json present but MCP SDK not installed" "run 'make setup' (or 'bun install') to pull @modelcontextprotocol/sdk"
+  fi
+else
+  ok "no MCP servers configured (.pi/mcp.json absent — browser still works via <browse>)"
 fi
 
 echo

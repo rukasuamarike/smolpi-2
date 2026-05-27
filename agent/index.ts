@@ -5,12 +5,13 @@ import {
   type Capability,
 } from "./capabilities";
 import { ExtensionHost } from "./extensions/host";
+import type { McpBridge } from "./mcp/bridge"; // type-only: erased at compile time, no SDK at runtime
 import { SessionLogger, type Usage } from "./logger";
 
 const LLM_BASE = process.env.LLM_URL ?? "http://127.0.0.1:8080";
 const LLM_URL = LLM_BASE.replace(/\/+$/, "") + "/v1/chat/completions";
 const MODEL = process.env.LLM_MODEL ?? "gemma-4";
-const BROWSER_BIN = process.env.BROWSER_BIN ?? "/usr/local/bin/browser_skill";
+const BROWSER_BIN = process.env.BROWSER_BIN ?? "browser39"; // Rust single binary, no Chromium
 const APPEND_PATH = process.env.APPEND_SYSTEM_PATH ?? "/app/.pi/APPEND_SYSTEM.md";
 
 // Loop controls (env-overridable).
@@ -63,8 +64,8 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
 
   const toolSpecs = host.toolSpecs();
   if (toolSpecs.length || EXPERIMENTAL) {
-    lines.push("## Memory & knowledge tools");
-    lines.push("Call ONE when the injected memory above is INSUFFICIENT — to recall/search prior knowledge, consult the wiki, or save a durable fact. Do NOT call one if the answer is already in the context above.");
+    lines.push("## Memory, knowledge & MCP tools");
+    lines.push("Call ONE to recall/search prior knowledge, consult the wiki, save a durable fact, or reach an MCP server (the `mcp` tool — e.g. browser39 interactive browsing: click/fill/submit). Skip the memory tools if the answer is already in the context above.");
     for (const s of toolSpecs) lines.push(`- ${s.name}(${s.args}) — ${s.description}`);
     if (EXPERIMENTAL) {
       lines.push('- delegate(task, tasks) — run independent sub-task(s) in FRESH isolated contexts; pass tasks:["a","b"] to run them IN PARALLEL. Returns only their distilled results. Use for independent research/exploration that would otherwise bloat this context.');
@@ -142,12 +143,14 @@ async function llm(messages: Message[]): Promise<LlmResult> {
 }
 
 async function browse(url: string): Promise<string> {
-  const proc = Bun.spawn([BROWSER_BIN, url], { stdout: "pipe", stderr: "pipe" });
+  // browser39 `fetch` runs JS (V8), follows the page, and emits token-efficient
+  // Markdown directly — no Chromium, no separate readability pass.
+  const proc = Bun.spawn([BROWSER_BIN, "fetch", url], { stdout: "pipe", stderr: "pipe" });
   const stdout = await new Response(proc.stdout).text();
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
     const stderr = await new Response(proc.stderr).text();
-    throw new Error(`browser_skill failed (${exitCode}): ${stderr.trim()}`);
+    throw new Error(`browser39 fetch failed (${exitCode}): ${stderr.trim()}`);
   }
   let out = stdout.trim();
   if (out.length > OUT_CAP) out = out.slice(0, OUT_CAP) + "\n…[truncated]";
@@ -371,6 +374,33 @@ async function initHost(): Promise<ExtensionHost> {
   const host = new ExtensionHost();
   await host.load();
   await host.sessionStart();
+
+  // Native MCP bridge — deny-by-default: only active if .pi/mcp.json declares
+  // servers (e.g. browser39's `browser39 mcp`). Registers ONE proxy tool plus any
+  // configured direct tools. Connections are lazy, so boot stays fast.
+  // Loaded lazily so a missing/broken @modelcontextprotocol/sdk degrades
+  // gracefully (no MCP) instead of crashing the whole agent at startup.
+  try {
+    const { McpBridge } = await import("./mcp/bridge");
+    const mcp: McpBridge = new McpBridge();
+    mcp.load();
+    if (mcp.serverCount > 0) {
+      const tools = mcp.proxyEnabled ? [mcp.proxyTool()] : [];
+      tools.push(...(await mcp.directTools()));
+      host.registerNative("mcp-bridge", tools);
+      console.error(`[mcp] ${mcp.summary()}`);
+      // `exit` handlers are synchronous and can't await, so stdio MCP children
+      // could be orphaned. Use signal handlers that await shutdown, then exit.
+      const shutdown = async (code: number) => {
+        try { await mcp.shutdownAll(); } catch { /* best-effort child cleanup */ }
+        process.exit(code);
+      };
+      process.once("SIGINT", () => { void shutdown(130); });
+      process.once("SIGTERM", () => { void shutdown(143); });
+    }
+  } catch (e) {
+    console.error("[mcp] bridge unavailable: " + (e as Error).message);
+  }
   return host;
 }
 

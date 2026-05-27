@@ -17,10 +17,10 @@ export const capabilities: Capability[] = [
   {
     name: "browse",
     group: "WEB",
-    description: "Headless chromium + readability → semantic Markdown",
+    description: "browser39 (Rust single binary, no Chromium) → token-efficient Markdown",
     usage: "[browse:URL]",
     snippet: "[browse:URL] — Get a semantic Markdown view of a page.",
-    check: "/app/bin/browser_skill",
+    check: "browser39",
   },
 
   // ── SEARCH ─────────────────────────────────────────────────

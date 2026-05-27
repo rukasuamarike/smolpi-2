@@ -243,6 +243,15 @@ export class ExtensionHost {
     return sys.length > cap ? sys.slice(0, cap) : sys;
   }
 
+  /** Register tools from a NATIVE (non-vendored) source — e.g. the MCP bridge
+   *  (agent/mcp/bridge.ts) — so they flow through the same toolSpecs()/callTool()
+   *  path as vendored extensions. */
+  registerNative(name: string, tools: ToolDef[]): void {
+    if (!tools.length) return;
+    this.loaded.push({ name, tools, hooks: new Map(), commands: [] });
+    console.error(`[ext] registered native ${name}: ${tools.length} tools`);
+  }
+
   /** Tools contributed by enabled, non-command-only extensions. */
   tools(): ToolDef[] {
     return this.loaded.flatMap((e) => e.tools);

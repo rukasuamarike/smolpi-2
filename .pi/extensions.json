@@ -44,6 +44,12 @@
       "enabled": false,
       "commandOnly": true,
       "note": "Publishes redacted sessions to GitHub Gist / HF (irreversible). Manual command only; never autorun."
+    },
+    "pi-mcp-adapter": {
+      "path": "../extensions/pi-mcp-adapter",
+      "tier": "experimental",
+      "enabled": false,
+      "note": "Upstream MCP adapter (reference only). smolpi does NOT load this — it can't run here (needs pi runtime APIs: OAuth/Glimpse-UI/sampling/model-registry). Instead the native MCP bridge (agent/mcp/bridge.ts) reads the SAME .pi/mcp.json on the official @modelcontextprotocol/sdk. Vendored to track upstream + pull updates."
     }
   }
 }

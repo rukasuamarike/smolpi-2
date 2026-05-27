@@ -19,3 +19,6 @@
 [submodule "smolvm"]
 	path = smolvm
 	url = https://github.com/smol-machines/smolvm.git
+[submodule "extensions/pi-mcp-adapter"]
+	path = extensions/pi-mcp-adapter
+	url = https://github.com/nicobailon/pi-mcp-adapter.git

@@ -22,11 +22,13 @@ on an iPhone.
   Bookworm-slim OCI image. No Docker daemon at runtime; boots in ms.
 - **🧠 Brain** — `llama.cpp` serving **Gemma 4 E4B** (~2.7 GB Q4_K_M) on the host GPU, exposed as an
   OpenAI-compatible API. The guest reaches it on `localhost:8080` (WSL2 mirrored networking).
-- **👁️ Eyes** — a Go + Chromedp browser skill compiled to one static binary; turns the open web into
-  clean, token-efficient Markdown (no messy HTML to the LLM).
+- **👁️ Eyes** — [`browser39`](https://github.com/alejandroqh/browser39): a single Rust binary (no Chromium,
+  V8 for JS) that turns the open web into clean, token-efficient Markdown. Page reads go through the
+  `<browse>` action; for interaction (click/fill/submit/dom_query) it also runs as an MCP server.
 - **🛠️ Hands** — a Bun TypeScript agent (`agent/index.ts`) with an **autonomous multi-step loop**, a
-  self-describing capability registry (`agent/capabilities.ts`), and an optional **extension host** for
-  pluggable memory/knowledge tools.
+  self-describing capability registry (`agent/capabilities.ts`), an optional **extension host** for
+  pluggable memory/knowledge tools, and a **native MCP bridge** (`agent/mcp/bridge.ts`, on the official
+  `@modelcontextprotocol/sdk`) that exposes any server in `.pi/mcp.json` via one `mcp` proxy tool.
 
 ---
 
@@ -102,6 +104,11 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
   knowledge vault). These are written for the pi.dev runtime; smolpi loads them through a small compat
   host using tracked shims under `shims/` (wired by `make setup` / `bun install`). `make doctor` verifies
   they're installed. See [`docs/EXTENSION_REVIEW.md`](./docs/EXTENSION_REVIEW.md).
+- **MCP bridge** — configure MCP servers in [`.pi/mcp.json`](./.pi/mcp.json) (same format as
+  `pi-mcp-adapter`). The native bridge (`agent/mcp/bridge.ts`, on the official `@modelcontextprotocol/sdk`)
+  connects lazily and exposes them via one ~200-token `mcp` proxy tool — `mcp({})` lists, `{"search":…}`
+  finds, `{"describe":…}` shows a schema, `{"tool":…,"args":"{…}"}` calls. Ships wired to `browser39`'s
+  server for interactive browsing. Set a server's `directTools` to promote specific tools to first-class.
 - **Soul / persona** — drop persona text into `.pi/APPEND_SYSTEM.md`; it's appended to the system prompt.
 - **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages
   (post-processable into training data). `/logs` summarizes token efficiency.
@@ -126,7 +133,9 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 | `CTX_CHAR_BUDGET` | `16000` | sliding-window context trim |
 | `AGENT_TASK` | _(unset)_ | one-shot task (non-interactive) |
 | `AGENT_EXPERIMENTAL` | _(unset)_ | `1` enables native parallel `delegate` |
+| `BROWSER_BIN` | `browser39` | the `<browse>` backend (browser39's binary) |
 | `PI_EXTENSIONS_CONFIG` | `/app/.pi/extensions.json` | extension toggle registry |
+| `MCP_CONFIG` | _(unset)_ | override MCP config path (default `.pi/mcp.json`) |
 | `APPEND_SYSTEM_PATH` | `/app/.pi/APPEND_SYSTEM.md` | persona/system append |
 | `WIKI_HOME` | `$HOME` | llm-wiki vault root (keeps it single-level) |
 
@@ -149,8 +158,8 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 ---
 
 ## ⚠️ Known quirks
-- **Memory pressure** — a 4B model + headless Chromium on one host is tight; the Smolfile caps the guest
-  at 4 GiB to leave the host GPU/`llama-server` headroom.
+- **Memory pressure** — a 4B model on one host is tight; the Smolfile caps the guest at 4 GiB to leave the
+  host GPU/`llama-server` headroom. (Dropping Chromium for `browser39` reclaimed a big chunk of that.)
 - **Apple Silicon** — Metal auto-enables at build time, so the default build yields a Metal-accelerated
   `llama-server` on M-series Macs.
 

@@ -1,0 +1,16 @@
+{
+  "_comment": "MCP servers bridged into the agent via the native bridge (agent/mcp/bridge.ts), which uses the official @modelcontextprotocol/sdk. Same format as pi-mcp-adapter (.pi/mcp.json). The agent sees ONE ~200-token `mcp` proxy tool (list/search/describe/call); set a server's directTools to promote specific tools to first-class instead.",
+  "settings": {
+    "toolPrefix": "none",
+    "idleTimeout": 10,
+    "directTools": false
+  },
+  "mcpServers": {
+    "browser39": {
+      "command": "browser39",
+      "args": ["mcp"],
+      "lifecycle": "lazy",
+      "_note": "browser39's 29 interactive tools (fetch/click/fill/submit/dom_query/session). Tools are already `browser39_`-prefixed, so toolPrefix is 'none' to avoid double-prefixing. Plain page reads go through the <browse> action; reach for these when a page needs interaction."
+    }
+  }
+}
