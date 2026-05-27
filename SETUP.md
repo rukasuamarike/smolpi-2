@@ -2,6 +2,11 @@
 
 Everything needed to build and run this project on a fresh host.
 
+> **Fastest path:** run **`./scripts/setup.sh`** (or `make setup`) — one semi-interactive
+> script that installs host deps (apt), pulls submodules, fetches the latest **smolvm**
+> release (checksum-verified), runs `bun install`, and locates your brain. `make setup-yes`
+> runs it non-interactively. The sections below are the per-component manual reference.
+
 Tested on:
 - Ubuntu 24.04 (WSL2), x86_64 — primary dev target
 - macOS 14+ on Apple Silicon (M1–M4) — for `llama-server` only; smolvm guests run on Linux hosts
@@ -38,6 +43,10 @@ bun --version
 ## 3. smolvm CLI
 
 The MicroVM runtime. Packs OCI images into self-contained executables with sub-second boot.
+
+> `make setup` (scripts/setup.sh) installs the latest release for you — downloads the
+> GitHub release tarball, verifies its checksum, and symlinks `smolvm` onto your PATH.
+> The manual install below is the alternative / for a specific version.
 
 ```bash
 # Install (check https://smolmachines.com for latest instructions)

@@ -5,7 +5,7 @@ HOST_GW     := localhost
 LLM_PORT    := 8080
 VM_NAME     := pi-agent-dev
 
-.PHONY: doctor setup setup-extensions pack \
+.PHONY: doctor setup setup-yes setup-extensions pack \
         machine-up machine-init machine-snapshot machine-down \
         test test-brain test-smol-net machine-exec machine-run clean
 
@@ -13,21 +13,11 @@ VM_NAME     := pi-agent-dev
 doctor:          ## Preflight: check tools, llama.cpp, model, brain, VM — with fixes
 	@bash scripts/doctor.sh
 
-setup:           ## Install host deps + fetch submodules + wire extension shims (run before first boot)
-	@echo "==> Installing host deps (libvirglrenderer1 → smolvm's libkrun; git-lfs → submodule libs)"
-	@if command -v apt-get >/dev/null 2>&1; then \
-		sudo apt-get update && sudo apt-get install -y libvirglrenderer1 git-lfs; \
-	else \
-		echo "⚠ non-apt host — install libvirglrenderer1 + git-lfs via your package manager"; \
-	fi
-	@command -v git-lfs >/dev/null 2>&1 && git lfs install || echo "⚠ git-lfs missing — submodule libs may be LFS pointer files"
-	git submodule update --init --recursive
-	@mkdir -p models
-	@command -v bun >/dev/null 2>&1 && bun install \
-		|| echo "⚠ bun not on host — install bun then run 'bun install' to wire extension shims"
-	@echo "Next: start the brain — ./scripts/run-brain.sh"
-	@echo "  (uses ./models + ./llama.cpp; falls back to ~/smolpi/{models,llama.cpp};"
-	@echo "   override with MODELS_DIR=… LLAMA_SERVER=… — see SETUP.md), then 'make machine-up && make doctor'."
+setup:           ## One-shot semi-interactive onboarding (deps, submodules, smolvm, bun, brain)
+	@bash scripts/setup.sh
+
+setup-yes:       ## Non-interactive onboarding (assume yes to every prompt)
+	@bash scripts/setup.sh --yes
 
 setup-extensions: ## (re)wire the extension compat shims into node_modules
 	bun install
