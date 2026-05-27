@@ -34,10 +34,10 @@ fi
 [ -n "$(ls -A smolvm 2>/dev/null)" ] && ok "smolvm submodule populated (vendored source)" || warn "smolvm submodule empty" "make setup  (vendored runtime source; needed only to build smolvm from source)"
 
 echo "── brain: llama.cpp ──"
-if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else warn "llama.cpp submodule empty" "only needed to BUILD llama-server here; fine if you use ~/smolpi's build or a system one. populate: make setup"; fi
+if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else warn "llama.cpp submodule empty" "only needed to BUILD llama-server here; fine if you use an external build (LLAMA_SERVER/BRAIN_DIR) or a system one. populate: make setup"; fi
 
 LS=""
-for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server ./llama.cpp/llama-server "$(command -v llama-server 2>/dev/null || true)" /usr/local/bin/llama-server "$HOME/smolpi/llama.cpp/build/bin/llama-server"; do
+for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server ./llama.cpp/llama-server "$(command -v llama-server 2>/dev/null || true)" /usr/local/bin/llama-server "${BRAIN_DIR:+$BRAIN_DIR/llama.cpp/build/bin/llama-server}"; do
   [ -n "$p" ] && [ -x "$p" ] && LS="$p" && break
 done
 if [ -n "$LS" ]; then
@@ -62,17 +62,18 @@ echo "── brain: model ──"
 MODELS_DIR="${MODELS_DIR:-./models}"
 if ls "$MODELS_DIR"/*.gguf >/dev/null 2>&1; then
   ok "model(s) in $MODELS_DIR: $(ls "$MODELS_DIR"/*.gguf | xargs -n1 basename | tr '\n' ' ')"
-elif ls "$HOME"/smolpi/models/*.gguf >/dev/null 2>&1; then
-  ok "model(s) in ~/smolpi/models: $(ls "$HOME"/smolpi/models/*.gguf | xargs -n1 basename | tr '\n' ' ')"
+elif [ -n "${BRAIN_DIR:-}" ] && ls "$BRAIN_DIR"/models/*.gguf >/dev/null 2>&1; then
+  ok "model(s) in \$BRAIN_DIR/models: $(ls "$BRAIN_DIR"/models/*.gguf | xargs -n1 basename | tr '\n' ' ')"
 else
-  bad "no .gguf in $MODELS_DIR or ~/smolpi/models" "drop a Gemma gguf into ./models (see README → Get a model), or set MODELS_DIR=…"
+  bad "no .gguf in $MODELS_DIR${BRAIN_DIR:+ or \$BRAIN_DIR/models}" "drop a Gemma gguf into ./models (see README → Get a model), or set MODELS_DIR=… / BRAIN_DIR=…"
 fi
 
 echo "── brain: reachable ──"
-if curl -sf --connect-timeout 2 http://localhost:8080/health >/dev/null 2>&1; then
-  ok "llama-server responding on localhost:8080"
+LLM_HOST="${LLM_HOST:-localhost}"; LLM_PORT="${LLM_PORT:-8080}"
+if curl -sf --connect-timeout 2 "http://$LLM_HOST:$LLM_PORT/v1/models" >/dev/null 2>&1; then
+  ok "LLM (OpenAI API) responding on $LLM_HOST:$LLM_PORT"
 else
-  warn "brain not running on :8080" "start it: ./scripts/run-brain.sh"
+  warn "no LLM on $LLM_HOST:$LLM_PORT" "start llama.cpp (./scripts/run-brain.sh) or LMStudio's server; override LLM_HOST/LLM_PORT (LMStudio defaults to 1234)"
 fi
 
 echo "── guest VM ──"

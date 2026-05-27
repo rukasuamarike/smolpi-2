@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${PORT:-8080}"
+PORT="${PORT:-${LLM_PORT:-8080}}"
 HOST="0.0.0.0"
 CTX_SIZE="${CTX_SIZE:-4096}"
 MODELS_DIR="${MODELS_DIR:-./models}"
@@ -13,8 +13,11 @@ SEARCH_PATHS=(
     "./llama.cpp/llama-server"
     "$(command -v llama-server 2>/dev/null || true)"
     "/usr/local/bin/llama-server"
-    "$HOME/smolpi/llama.cpp/build/bin/llama-server"
+    "${BRAIN_DIR:+$BRAIN_DIR/llama.cpp/build/bin/llama-server}"
 )
+# Tip: point BRAIN_DIR at an external checkout (expects
+# $BRAIN_DIR/llama.cpp/build/bin/llama-server + $BRAIN_DIR/models), or set
+# LLAMA_SERVER=/path/to/llama-server and MODELS_DIR=/path/to/models directly.
 
 LLAMA_SERVER=""
 for p in "${SEARCH_PATHS[@]}"; do
@@ -44,18 +47,18 @@ echo "Found: $LLAMA_SERVER"
 # RUNPATH points at a stale absolute path (e.g. after moving the tree).
 export LD_LIBRARY_PATH="$(cd "$(dirname "$LLAMA_SERVER")" && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# ── Select a GGUF model (MODELS_DIR, else ~/smolpi/models) ───
+# ── Select a GGUF model (MODELS_DIR, else $BRAIN_DIR/models) ──
 mapfile -t MODELS < <(find "$MODELS_DIR" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null | sort)
-if [[ ${#MODELS[@]} -eq 0 && -d "$HOME/smolpi/models" ]]; then
-    echo "No .gguf in $MODELS_DIR — falling back to ~/smolpi/models"
-    MODELS_DIR="$HOME/smolpi/models"
+if [[ ${#MODELS[@]} -eq 0 && -n "${BRAIN_DIR:-}" && -d "$BRAIN_DIR/models" ]]; then
+    echo "No .gguf in $MODELS_DIR — falling back to \$BRAIN_DIR/models ($BRAIN_DIR/models)"
+    MODELS_DIR="$BRAIN_DIR/models"
     mapfile -t MODELS < <(find "$MODELS_DIR" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null | sort)
 fi
 
 if [[ ${#MODELS[@]} -eq 0 ]]; then
-    echo "ERROR: No .gguf files found in $MODELS_DIR/ (and no ~/smolpi/models)"
+    echo "ERROR: No .gguf files found in $MODELS_DIR/${BRAIN_DIR:+ or \$BRAIN_DIR/models}"
     echo ""
-    echo "Drop a .gguf into ./models/ or set MODELS_DIR=…, e.g.:"
+    echo "Drop a .gguf into ./models/, or set MODELS_DIR=… or BRAIN_DIR=…, e.g.:"
     echo "  curl -L -o ./models/gemma-2-2b-Q4_K_M.gguf \\"
     echo '    "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf"'
     exit 1

@@ -84,6 +84,23 @@ For a **truly minimal, `/dev/kvm`-only portable artifact** (no graphics-stack de
 
 The local LLM backend. Must listen on `0.0.0.0` so the smolvm guest can reach it via the host gateway (`172.16.0.1`).
 
+> **Prefer LMStudio (or any OpenAI-compatible server)?** The agent only needs an
+> OpenAI-compatible `/v1/chat/completions` endpoint, so llama.cpp is not required. Start
+> your server — for **LMStudio**, enable its local server (defaults to port **1234**) and
+> tick *Serve on local network* / bind `0.0.0.0` so the guest can reach it — then point the
+> agent at it by overriding the port (or full URL):
+>
+> ```bash
+> make machine-up  LLM_PORT=1234
+> make machine-run LLM_PORT=1234 LLM_MODEL=<your-model-id>
+> # or set the base URL explicitly (the agent appends /v1/chat/completions):
+> make machine-run LLM_URL=http://127.0.0.1:1234 LLM_MODEL=<your-model-id>
+> ```
+>
+> These pass through to the guest via `smolvm … -e LLM_URL=… -e LLM_MODEL=…`, so nothing is
+> hardcoded in the Smolfile. `make doctor LLM_PORT=1234` probes `/v1/models` (exposed by both
+> llama.cpp and LMStudio). The rest of this section is llama.cpp-specific.
+
 ### Get the source
 
 `llama.cpp` is vendored as a git submodule. If you cloned this repo without `--recurse-submodules`:

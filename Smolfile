@@ -10,8 +10,11 @@ memory = 4096
 
 env = [
     "DEBIAN_FRONTEND=noninteractive",
-    "LLM_URL=http://127.0.0.1:8080",
-    "LLM_MODEL=gemma-4",
+    # LLM endpoint is NOT baked here — the launcher injects it: `make machine-up`
+    # / `machine-run` pass `-e LLM_URL=… -e LLM_MODEL=…` (default
+    # http://127.0.0.1:8080 + gemma-4; override e.g. `make machine-run LLM_PORT=1234`
+    # for LMStudio). start-agent.sh also defaults them, so a bare
+    # `smolvm machine create -s Smolfile` still works.
     "BROWSER_BIN=browser39",
     "WIKI_HOME=/root",
 ]

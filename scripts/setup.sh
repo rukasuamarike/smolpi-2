@@ -103,7 +103,7 @@ say "2/6  Submodules  (extensions, smolvm source, MCP adapter)"
 # the smolvm *release binary*, not a from-source build.
 mods=$(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}')
 if ! ask "Also pull the llama.cpp submodule? (large; skip if you run an external llama-server)" N; then
-  warn "skipping llama.cpp (run ./scripts/run-brain.sh against ~/smolpi or set LLAMA_SERVER)"
+  warn "skipping llama.cpp (use a system/external llama-server — set LLAMA_SERVER or BRAIN_DIR for run-brain.sh)"
   mods=$(printf '%s\n' "$mods" | grep -vx 'llama.cpp')
 fi
 # shellcheck disable=SC2086
@@ -131,15 +131,15 @@ else warn "bun not on host — install: curl -fsSL https://bun.sh/install | bash
 # ── 5) brain (llama-server + model) ─────────────────────────────────────────
 say "5/6  Brain  (llama-server + a .gguf model)"
 ls_bin=""
-for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server "$(command -v llama-server 2>/dev/null||true)" /usr/local/bin/llama-server "$HOME/smolpi/llama.cpp/build/bin/llama-server"; do
+for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server "$(command -v llama-server 2>/dev/null||true)" /usr/local/bin/llama-server "${BRAIN_DIR:+$BRAIN_DIR/llama.cpp/build/bin/llama-server}"; do
   [ -n "$p" ] && [ -x "$p" ] && ls_bin="$p" && break
 done
-[ -n "$ls_bin" ] && ok "llama-server: $ls_bin" || warn "no llama-server found — build llama.cpp (-DGGML_CUDA=ON) or set LLAMA_SERVER=…"
-model=""
-for d in "${MODELS_DIR:-./models}" "$HOME/smolpi/models"; do
+[ -n "$ls_bin" ] && ok "llama-server: $ls_bin" || warn "no llama-server found — build llama.cpp (-DGGML_CUDA=ON), or set LLAMA_SERVER=… / BRAIN_DIR=…"
+model=""; mdirs=("${MODELS_DIR:-./models}"); [ -n "${BRAIN_DIR:-}" ] && mdirs+=("$BRAIN_DIR/models")
+for d in "${mdirs[@]}"; do
   m=$(find "$d" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null | head -1); [ -n "$m" ] && model="$m" && break
 done
-[ -n "$model" ] && ok "model: $model" || warn "no .gguf found — drop one in ./models or set MODELS_DIR=…"
+[ -n "$model" ] && ok "model: $model" || warn "no .gguf found — drop one in ./models, or set MODELS_DIR=… / BRAIN_DIR=…"
 
 # ── 6) preflight ────────────────────────────────────────────────────────────
 say "6/6  Preflight"

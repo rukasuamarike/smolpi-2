@@ -1,8 +1,12 @@
 IMAGE_NAME  := pi-agent-smol
 ARCH        ?= amd64
 PACK_BIN    := ./pi-agent
-HOST_GW     := localhost
-LLM_PORT    := 8080
+# LLM endpoint — all overridable, e.g. `make machine-run LLM_PORT=1234` for LMStudio.
+LLM_HOST    ?= 127.0.0.1
+LLM_PORT    ?= 8080
+LLM_URL     ?= http://$(LLM_HOST):$(LLM_PORT)
+LLM_MODEL   ?= gemma-4
+HOST_GW     ?= $(LLM_HOST)
 VM_NAME     := pi-agent-dev
 
 .PHONY: doctor setup setup-yes setup-extensions pack \
@@ -33,10 +37,10 @@ machine-up:
 		echo "Machine $(VM_NAME) already exists, starting..."; \
 	elif [ -f $(PACK_BIN).smolmachine ]; then \
 		echo "Creating machine from snapshot..."; \
-		smolvm machine create $(VM_NAME) --from $(PACK_BIN).smolmachine; \
+		smolvm machine create -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) $(VM_NAME) --from $(PACK_BIN).smolmachine; \
 	else \
 		echo "No snapshot found. Creating fresh machine from Smolfile..."; \
-		smolvm machine create -s Smolfile $(VM_NAME); fresh=1; \
+		smolvm machine create -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -s Smolfile $(VM_NAME); fresh=1; \
 	fi; \
 	smolvm machine start --name $(VM_NAME); \
 	if [ "$$fresh" = "1" ]; then \
@@ -59,13 +63,13 @@ machine-snapshot:
 	@echo "Future 'make machine-up' boots from this snapshot."
 
 test-brain:
-	smolvm machine exec --name $(VM_NAME) -- bun run /app/scripts/test-connection.ts
+	smolvm machine exec --name $(VM_NAME) -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -- bun run /app/scripts/test-connection.ts
 
 machine-exec:
 	smolvm machine exec --name $(VM_NAME) -it -- /bin/bash
 
 machine-run:
-	smolvm machine exec --name $(VM_NAME) -it -- sh /app/scripts/start-agent.sh
+	smolvm machine exec --name $(VM_NAME) -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -it -- sh /app/scripts/start-agent.sh
 
 machine-down:
 	-smolvm machine stop --name $(VM_NAME) 2>/dev/null
