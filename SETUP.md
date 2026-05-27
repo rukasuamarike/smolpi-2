@@ -1,4 +1,4 @@
-# Host Setup — pi-agent-smol
+# Setup — pi-agent-smol
 
 Everything needed to build and run this project on a fresh host.
 
@@ -6,53 +6,15 @@ Tested on:
 - Ubuntu 24.04 (WSL2), x86_64 — primary dev target
 - macOS 14+ on Apple Silicon (M1–M4) — for `llama-server` only; smolvm guests run on Linux hosts
 
-Linux/WSL2 sections cover Docker, smolvm, libkrun, etc. Mac users primarily need section 5 (llama-server) — smolvm itself currently targets Linux.
+Install `git-lfs` before `make setup` — the smolvm and llama.cpp submodules ship binaries (libkrun, libkrunfw) via LFS, and without it they arrive as pointer files. `sudo apt install git-lfs && git lfs install`.
+
+Linux/WSL2 sections cover smolvm, libkrun, etc. Mac users primarily need section 4 (llama-server) — smolvm itself currently targets Linux.
 
 ---
 
-## 1. Docker & Buildx
+## 1. Go 1.22+
 
-Docker Engine with buildx is required for multi-arch OCI image builds and the local registry bridge.
-
-```bash
-# Install Docker Engine (not Docker Desktop)
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
-
-# Run without sudo
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Verify
-docker buildx version
-```
-
-### QEMU for ARM64 cross-compilation
-
-Required for `make build ARCH=arm64` on an x86_64 host:
-
-```bash
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-# Verify
-docker buildx build --platform linux/arm64 -t test-arm64 - <<< 'FROM alpine' --load
-```
-
----
-
-## 2. Go 1.22+
-
-Only needed if you want to run `go mod tidy` or build `browser_skill` outside Docker. The Dockerfile handles Go compilation internally.
+Needed to compile `browser_skill` on the host — `make build-go` cross-compiles it to `./bin/`, which the Smolfile mounts into the guest.
 
 ```bash
 GO_VERSION=1.22.5
@@ -66,9 +28,9 @@ go version
 
 ---
 
-## 3. Bun
+## 2. Bun
 
-Only needed for running the agent locally outside Docker/smolvm.
+Only needed for running the agent directly on the host (outside the smolvm guest); the guest installs its own bun via `guest-setup.sh`.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
@@ -80,7 +42,7 @@ bun --version
 
 ---
 
-## 4. smolvm CLI
+## 3. smolvm CLI
 
 The MicroVM runtime. Packs OCI images into self-contained executables with sub-second boot.
 
@@ -89,55 +51,34 @@ The MicroVM runtime. Packs OCI images into self-contained executables with sub-s
 curl -fsSL https://smolmachines.com/install.sh | bash
 
 # Verify
-smolvm --version   # should be v0.5.x+
+smolvm --version   # should be v0.8.0+
 ```
 
 ### libkrun (MicroVM backend)
 
-smolvm bundles `libkrun` and `libkrunfw` in `~/.smolvm/lib/`. The `smolvm` wrapper script sets `LD_LIBRARY_PATH` so it finds them automatically. However, **packed binaries** (e.g. `./pi-agent`) do not — they link against the system library path.
+smolvm runs on `libkrun` + `libkrunfw`. How they're located differs between the CLI and a packed binary:
 
-Install the bundled libs system-wide:
+- **CLI (`smolvm …`)** — the wrapper script bundles the libs (release `lib/`, or `~/.smolvm/lib/`) and sets `LD_LIBRARY_PATH` automatically. Always invoke the `smolvm` wrapper, never `smolvm-bin` directly.
+- **Packed binaries (v0.8.0+, e.g. `./pi-agent`)** — the libs are **embedded inside the executable** (a `SMOLLIBS` footer) and self-extract to `~/.cache/smolvm-pack/<id>/lib/` on first run, loaded from there by absolute path. **No system install and no `LD_LIBRARY_PATH` needed** — a packed binary runs on any host with `/dev/kvm`, even with smolvm fully uninstalled. (Verified: a v0.8.0 single-file pack boots a guest in a clean env with `smolvm` off `PATH` and an empty `LD_LIBRARY_PATH`; `strace` confirms it loads its own extracted libkrun, not any system copy.)
 
-```bash
-# Copy from smolvm's bundled libs
-sudo cp ~/.smolvm/lib/libkrun.so /usr/local/lib/libkrun.so.1.9.1
-sudo cp ~/.smolvm/lib/libkrunfw.so.5.3.0 /usr/local/lib/libkrunfw.so.5.3.0
+> **Obsolete (v0.5.x only):** older instructions here told you to `sudo cp` libkrun into `/usr/local/lib` + `ldconfig`. That was only needed for **v0.5.x** packs, which linked against the *system* library path. v0.8.0+ packs carry and self-extract their own libs and ignore any system copy — an old `/usr/local/lib/libkrun.so.1.9.1` is harmless but unused. Safe to leave or remove.
 
-# Create symlinks
-sudo ln -sf /usr/local/lib/libkrun.so.1.9.1 /usr/local/lib/libkrun.so.1
-sudo ln -sf /usr/local/lib/libkrun.so.1.9.1 /usr/local/lib/libkrun.so
-sudo ln -sf /usr/local/lib/libkrunfw.so.5.3.0 /usr/local/lib/libkrunfw.so.5
-sudo ln -sf /usr/local/lib/libkrunfw.so.5.3.0 /usr/local/lib/libkrunfw.so
+#### Caveat: the official Linux release ships GPU-enabled libkrun
 
-# Update linker cache
-sudo ldconfig
-
-# Verify
-ldconfig -p | grep libkrun
-```
-
-#### Troubleshooting: `libkrun.so.1: cannot open shared object file`
-
-This error means the packed binary can't find libkrun in the system path.
-
-**Quick fix** (temporary, current shell only):
+The published `smolvm-*-linux-x86_64` release builds libkrun with `GPU=1`, so `libkrun.so` carries a hard `NEEDED` dependency on **`libvirglrenderer.so.1`** — required *at load time even if you never use the GPU* — and the release does **not** bundle it. virglrenderer in turn needs `libgbm`, `libdrm`, `libX11`, `libvulkan`, `libepoxy`. So both the CLI and any packed artifact's embedded libkrun need these present at runtime:
 
 ```bash
-export LD_LIBRARY_PATH="$HOME/.smolvm/lib:$LD_LIBRARY_PATH"
-./pi-agent --help
+# Debian/Ubuntu
+sudo apt install libvirglrenderer1
 ```
 
-**Permanent fix** (recommended):
+Symptom if missing: `load libkrun: … libvirglrenderer.so.1: cannot open shared object file`.
 
-Run the `sudo cp`, `sudo ln -sf`, and `sudo ldconfig` commands above. Verify with:
-
-```bash
-./pi-agent --help   # should print usage, no library errors
-```
+For a **truly minimal, `/dev/kvm`-only portable artifact** (no graphics-stack dependency at all), build libkrun *without* GPU from the `smolvm/` submodule — drop `GPU=1`, keep `BLK=1 NET=1` — and pack with that build.
 
 ---
 
-## 5. llama-server (llama.cpp)
+## 4. llama-server (llama.cpp)
 
 The local LLM backend. Must listen on `0.0.0.0` so the smolvm guest can reach it via the host gateway (`172.16.0.1`).
 
@@ -325,7 +266,7 @@ curl http://localhost:8080/health
 
 ---
 
-## 6. WSL2 Mirrored Networking (REQUIRED for guest → host LLM)
+## 5. WSL2 Mirrored Networking (REQUIRED for guest → host LLM)
 
 By default, WSL2 puts your distro behind a NAT bridge. The smolvm guest sits behind a second NAT layer, so reaching `llama-server` on the WSL2 host through `localhost` does not work without configuration. The legacy workaround was hardcoding the host gateway (`172.16.0.1`), which is fragile and changes between Windows updates.
 
@@ -391,16 +332,14 @@ After installing everything:
 ```bash
 cd pi-agent-smol
 
-# Smolfile-based dev workflow (recommended):
+# Smolfile dev workflow (the only build path — no Docker):
 make machine-up        # Boot the dev VM (uses snapshot if available)
 make machine-init      # First-time package install (one-off, then snapshot)
 make machine-snapshot  # Cache the configured VM for fast future boots
 make test-brain        # Verify guest → host LLM connection
 make machine-run       # Start the agent
 
-# OR full Docker pipeline:
-make build             # Build the OCI image
-make test              # Dry-run tests (chromium, go binary, tar)
-make pack              # Pack into a self-contained smolvm executable
-make test-smol-net     # End-to-end network test
+# 'make pack' (alias for machine-snapshot) produces ./pi-agent — a self-contained
+# binary that boots on any host with /dev/kvm, no smolvm install required.
+make test-smol-net     # End-to-end guest → host network test (needs ./pi-agent)
 ```

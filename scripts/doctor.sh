@@ -12,11 +12,27 @@ cd "$(dirname "$0")/.." || exit 1
 echo "🥣 Pi-Agent Soup — preflight ($(pwd))"
 
 echo "── host tools ──"
-have smolvm && ok "smolvm" || bad "smolvm missing" "install Smolmachines (see HOST_SETUP.md)"
-have docker && ok "docker" || bad "docker missing" "install Docker + buildx (see HOST_SETUP.md)"
-have git    && ok "git"    || bad "git missing" "install git"
-have go     && ok "go $(go version 2>/dev/null | awk '{print $3}')" || warn "go missing" "only needed for 'make build-go' (browser skill); the OCI image build doesn't use host go"
-have bun    && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "needed for 'make setup' (bun install wires extension shims, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"
+if have smolvm; then
+  SMV="$(smolvm --version 2>/dev/null | awk '{print $2}')"
+  if [ -n "$SMV" ] && [ "$(printf '%s\n0.8.0\n' "$SMV" | sort -V | head -1)" = "0.8.0" ]; then
+    ok "smolvm $SMV"
+  else
+    warn "smolvm ${SMV:-?} is old (< 0.8.0)" "v0.8.0+ packs embed libkrun & self-extract (no system libkrun needed). upgrade: curl -fsSL https://smolmachines.com/install.sh | bash"
+  fi
+else
+  bad "smolvm missing" "install Smolmachines (see SETUP.md)"
+fi
+have git     && ok "git"     || bad "git missing" "install git"
+have git-lfs && ok "git-lfs" || warn "git-lfs missing" "smolvm/llama.cpp submodules ship libs via LFS; without it 'make setup' leaves them as pointer files. install: sudo apt install git-lfs && git lfs install"
+have go      && ok "go $(go version 2>/dev/null | awk '{print $3}')" || warn "go missing" "only needed for 'make build-go' (browser skill)"
+have bun     && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "needed for 'make setup' (bun install wires extension shims, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"
+# smolvm's linux release links GPU-enabled libkrun → libvirglrenderer needed at load time (CLI + packed binaries)
+if ldconfig -p 2>/dev/null | grep -q 'libvirglrenderer\.so\.1'; then
+  ok "libvirglrenderer (libkrun runtime dep)"
+else
+  warn "libvirglrenderer.so.1 missing" "smolvm's linux release links GPU-enabled libkrun; CLI & packed binaries need it. install: sudo apt install libvirglrenderer1"
+fi
+[ -n "$(ls -A smolvm 2>/dev/null)" ] && ok "smolvm submodule populated (vendored source)" || warn "smolvm submodule empty" "make setup  (vendored runtime source; needed only to build smolvm from source)"
 
 echo "── brain: llama.cpp ──"
 if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else bad "llama.cpp submodule empty" "make setup   (git submodule update --init llama.cpp)"; fi

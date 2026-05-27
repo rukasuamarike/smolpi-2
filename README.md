@@ -33,17 +33,18 @@ on an iPhone.
 ## 🚀 Quick start
 
 > Hardware-specific setup (CUDA / Metal / Vulkan / CPU, WSL2 vs native vs Apple Silicon) lives in
-> [`HOST_SETUP.md`](./HOST_SETUP.md). **Whenever anything fails, run `make doctor`** — it checks every
+> [`SETUP.md`](./SETUP.md). **Whenever anything fails, run `make doctor`** — it checks every
 > prerequisite and prints the exact fix.
 
 ```bash
-# 0. Prereqs: smolvm, docker (+buildx), git, go, bun.
-#    (bun on the host wires the extension shims; the guest also installs its own.)
+# 0. Prereqs: smolvm (v0.8.0+), git, git-lfs, go, bun.
+#    (git-lfs materializes the submodules' libkrun/libkrunfw; bun on the host
+#     wires the extension shims; the guest also installs its own.)
 
 # 1. Fetch submodules (brain + extensions) and wire extension shims; makes ./models
 make setup                       # git submodule update --init --recursive + bun install
 
-# 2. Build llama-server for your GPU (CUDA example; see HOST_SETUP.md for Metal/Vulkan/CPU)
+# 2. Build llama-server for your GPU (CUDA example; see SETUP.md for Metal/Vulkan/CPU)
 cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON
 cmake --build llama.cpp/build -j --target llama-server
 
