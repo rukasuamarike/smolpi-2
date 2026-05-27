@@ -109,3 +109,9 @@ test: test-smol-net
 # ── Cleanup ──────────────────────────────────────────────────
 clean:
 	rm -f $(PACK_BIN) $(PACK_BIN).smolmachine
+
+# ── Optional: build a local llama.cpp brain ──────────────────
+# Platform-aware targets (brain, brain-cuda, brain-metal, brain-vulkan,
+# brain-hip, brain-cpu, brain-run). Skip entirely if you use LMStudio / an
+# external OpenAI-compatible server. Included last so `doctor` stays default.
+include brain.mk

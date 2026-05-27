@@ -101,6 +101,13 @@ The local LLM backend. Must listen on `0.0.0.0` so the smolvm guest can reach it
 > hardcoded in the Smolfile. `make doctor LLM_PORT=1234` probes `/v1/models` (exposed by both
 > llama.cpp and LMStudio). The rest of this section is llama.cpp-specific.
 
+**Shortcut — building llama.cpp yourself:** `make brain` auto-detects your backend
+(CUDA / Metal / Vulkan / CPU) and builds `llama-server`; force one with
+`make brain-cuda | brain-metal | brain-vulkan | brain-hip | brain-cpu`, then start it with
+`make brain-run`. These live in **`brain.mk`** (`make -f brain.mk brain` to run standalone) —
+kept separate from `make setup` so LMStudio users skip them. The manual steps below are the
+underlying detail.
+
 ### Get the source
 
 `llama.cpp` is vendored as a git submodule. If you cloned this repo without `--recurse-submodules`:

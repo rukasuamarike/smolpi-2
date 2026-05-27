@@ -134,7 +134,7 @@ ls_bin=""
 for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server "$(command -v llama-server 2>/dev/null||true)" /usr/local/bin/llama-server "${BRAIN_DIR:+$BRAIN_DIR/llama.cpp/build/bin/llama-server}"; do
   [ -n "$p" ] && [ -x "$p" ] && ls_bin="$p" && break
 done
-[ -n "$ls_bin" ] && ok "llama-server: $ls_bin" || warn "no llama-server found — build llama.cpp (-DGGML_CUDA=ON), or set LLAMA_SERVER=… / BRAIN_DIR=…"
+[ -n "$ls_bin" ] && ok "llama-server: $ls_bin" || warn "no llama-server found — build one: 'make brain' (auto-detects CUDA/Metal/Vulkan/CPU); or use LMStudio: 'make machine-run LLM_PORT=1234'; or set LLAMA_SERVER=… / BRAIN_DIR=…"
 model=""; mdirs=("${MODELS_DIR:-./models}"); [ -n "${BRAIN_DIR:-}" ] && mdirs+=("$BRAIN_DIR/models")
 for d in "${mdirs[@]}"; do
   m=$(find "$d" -maxdepth 1 -name '*.gguf' -type f 2>/dev/null | head -1); [ -n "$m" ] && model="$m" && break
