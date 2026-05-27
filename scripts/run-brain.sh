@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load host-side overrides from the repo-root .env (if present; see .env.example).
+_ENV="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/.env"
+[ -f "$_ENV" ] && { set -a; . "$_ENV"; set +a; }
+
 PORT="${PORT:-${LLM_PORT:-8080}}"
 HOST="0.0.0.0"
 CTX_SIZE="${CTX_SIZE:-4096}"

@@ -1,3 +1,6 @@
+# Local host overrides (gitignored; copy from .env.example). CLI args still win.
+-include .env
+
 IMAGE_NAME  := pi-agent-smol
 ARCH        ?= amd64
 PACK_BIN    := ./pi-agent
@@ -8,6 +11,8 @@ LLM_URL     ?= http://$(LLM_HOST):$(LLM_PORT)
 LLM_MODEL   ?= gemma-4
 HOST_GW     ?= $(LLM_HOST)
 VM_NAME     := pi-agent-dev
+# Forward host-side config into recipe subshells (run-brain.sh etc. inherit these).
+export LLM_HOST LLM_PORT LLM_URL LLM_MODEL BRAIN_DIR LLAMA_SERVER MODELS_DIR GPU_LAYERS CTX_SIZE
 
 .PHONY: doctor setup setup-yes setup-extensions pack \
         machine-up machine-init machine-snapshot machine-down \

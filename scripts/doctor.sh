@@ -9,6 +9,7 @@ bad()  { printf "  \033[31m✗\033[0m %s\n      ↳ fix: %s\n" "$1" "$2"; FAIL=$
 have() { command -v "$1" >/dev/null 2>&1; }
 
 cd "$(dirname "$0")/.." || exit 1
+[ -f .env ] && { set -a; . ./.env; set +a; }   # host-side overrides (see .env.example)
 echo "🥣 Pi-Agent Soup — preflight ($(pwd))"
 
 echo "── host tools ──"

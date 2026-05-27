@@ -10,3 +10,6 @@ models/
 *.gguf
 # Local runtime state
 .pi/umi_profile.json
+# Local host config (copy .env.example → .env); .env.example stays tracked
+.env
+.env.local
