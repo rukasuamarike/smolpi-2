@@ -16,3 +16,6 @@
 [submodule "extensions/llm-wiki"]
 	path = extensions/llm-wiki
 	url = https://github.com/zosmaai/pi-llm-wiki.git
+[submodule "smolvm"]
+	path = smolvm
+	url = https://github.com/smol-machines/smolvm.git
