@@ -10,7 +10,14 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 cd "$(dirname "$0")/.." || exit 1
 [ -f .env ] && { set -a; . ./.env; set +a; }   # host-side overrides (see .env.example)
+BRAIN_MODE="${BRAIN_MODE:-local}"  # local | external
+case "$BRAIN_MODE" in
+  local|external) ;;
+  *) warn "unknown BRAIN_MODE=$BRAIN_MODE" "expected 'local' or 'external'; falling back to local checks"; BRAIN_MODE=local ;;
+esac
+
 echo "🥣 Pi-Agent Soup — preflight ($(pwd))"
+echo "brain mode: $BRAIN_MODE"
 
 echo "── host tools ──"
 if have smolvm; then
@@ -35,38 +42,46 @@ fi
 [ -n "$(ls -A smolvm 2>/dev/null)" ] && ok "smolvm submodule populated (vendored source)" || warn "smolvm submodule empty" "make setup  (vendored runtime source; needed only to build smolvm from source)"
 
 echo "── brain: llama.cpp ──"
-if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else warn "llama.cpp submodule empty" "only needed to BUILD llama-server here; fine if you use an external build (LLAMA_SERVER/BRAIN_DIR) or a system one. populate: make setup"; fi
-
-LS=""
-for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server ./llama.cpp/llama-server "$(command -v llama-server 2>/dev/null || true)" /usr/local/bin/llama-server "${BRAIN_DIR:+$BRAIN_DIR/llama.cpp/build/bin/llama-server}"; do
-  [ -n "$p" ] && [ -x "$p" ] && LS="$p" && break
-done
-if [ -n "$LS" ]; then
-  ok "llama-server binary: $LS"
-  LIBDIR="$(cd "$(dirname "$LS")" && pwd)"
-  DEV="$(LD_LIBRARY_PATH="$LIBDIR" "$LS" --list-devices 2>&1)"
-  if printf '%s' "$DEV" | grep -qiE 'error while loading shared libraries'; then
-    bad "llama-server can't load its shared libraries" "run it via ./scripts/run-brain.sh (sets LD_LIBRARY_PATH), or rebuild llama.cpp"
-  else
-    ok "shared libraries load"
-    if printf '%s' "$DEV" | grep -qiE 'cuda|metal|vulkan|hip|rocm|sycl'; then
-      ok "GPU backend: $(printf '%s' "$DEV" | grep -ioE 'cuda|metal|vulkan|hip|rocm|sycl' | head -1)"
-    else
-      warn "no GPU backend (CPU only — slow)" "rebuild: cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON (or -DGGML_METAL=ON / -DGGML_VULKAN=ON) && cmake --build llama.cpp/build -j --target llama-server"
-    fi
-  fi
+if [ "$BRAIN_MODE" = "external" ]; then
+  warn "external brain mode: skipping local llama.cpp build checks" "doctor will require only an OpenAI-compatible /v1/models endpoint at LLM_HOST:LLM_PORT"
 else
-  bad "llama-server not built" "cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON && cmake --build llama.cpp/build -j --target llama-server"
+  if [ -n "$(ls -A llama.cpp 2>/dev/null)" ]; then ok "llama.cpp submodule populated"; else warn "llama.cpp submodule empty" "only needed to BUILD llama-server here; fine if you use an external build (LLAMA_SERVER/BRAIN_DIR) or a system one. populate: make setup"; fi
+
+  LS=""
+  for p in "${LLAMA_SERVER:-}" ./llama.cpp/build/bin/llama-server ./llama.cpp/llama-server "$(command -v llama-server 2>/dev/null || true)" /usr/local/bin/llama-server "${BRAIN_DIR:+$BRAIN_DIR/llama.cpp/build/bin/llama-server}"; do
+    [ -n "$p" ] && [ -x "$p" ] && LS="$p" && break
+  done
+  if [ -n "$LS" ]; then
+    ok "llama-server binary: $LS"
+    LIBDIR="$(cd "$(dirname "$LS")" && pwd)"
+    DEV="$(LD_LIBRARY_PATH="$LIBDIR" "$LS" --list-devices 2>&1)"
+    if printf '%s' "$DEV" | grep -qiE 'error while loading shared libraries'; then
+      bad "llama-server can't load its shared libraries" "run it via ./scripts/run-brain.sh (sets LD_LIBRARY_PATH), or rebuild llama.cpp"
+    else
+      ok "shared libraries load"
+      if printf '%s' "$DEV" | grep -qiE 'cuda|metal|vulkan|hip|rocm|sycl'; then
+        ok "GPU backend: $(printf '%s' "$DEV" | grep -ioE 'cuda|metal|vulkan|hip|rocm|sycl' | head -1)"
+      else
+        warn "no GPU backend (CPU only — slow)" "rebuild: cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON (or -DGGML_METAL=ON / -DGGML_VULKAN=ON) && cmake --build llama.cpp/build -j --target llama-server"
+      fi
+    fi
+  else
+    bad "llama-server not built" "cmake -B llama.cpp/build -S llama.cpp -DGGML_CUDA=ON && cmake --build llama.cpp/build -j --target llama-server"
+  fi
 fi
 
 echo "── brain: model ──"
-MODELS_DIR="${MODELS_DIR:-./models}"
-if ls "$MODELS_DIR"/*.gguf >/dev/null 2>&1; then
-  ok "model(s) in $MODELS_DIR: $(ls "$MODELS_DIR"/*.gguf | xargs -n1 basename | tr '\n' ' ')"
-elif [ -n "${BRAIN_DIR:-}" ] && ls "$BRAIN_DIR"/models/*.gguf >/dev/null 2>&1; then
-  ok "model(s) in \$BRAIN_DIR/models: $(ls "$BRAIN_DIR"/models/*.gguf | xargs -n1 basename | tr '\n' ' ')"
+if [ "$BRAIN_MODE" = "external" ]; then
+  warn "external brain mode: skipping local model file checks" "the external server owns model loading; set LLM_MODEL to its served model id"
 else
-  bad "no .gguf in $MODELS_DIR${BRAIN_DIR:+ or \$BRAIN_DIR/models}" "drop a Gemma gguf into ./models (see README → Get a model), or set MODELS_DIR=… / BRAIN_DIR=…"
+  MODELS_DIR="${MODELS_DIR:-./models}"
+  if ls "$MODELS_DIR"/*.gguf >/dev/null 2>&1; then
+    ok "model(s) in $MODELS_DIR: $(ls "$MODELS_DIR"/*.gguf | xargs -n1 basename | tr '\n' ' ')"
+  elif [ -n "${BRAIN_DIR:-}" ] && ls "$BRAIN_DIR"/models/*.gguf >/dev/null 2>&1; then
+    ok "model(s) in \$BRAIN_DIR/models: $(ls "$BRAIN_DIR"/models/*.gguf | xargs -n1 basename | tr '\n' ' ')"
+  else
+    bad "no .gguf in $MODELS_DIR${BRAIN_DIR:+ or \$BRAIN_DIR/models}" "drop a Gemma gguf into ./models (see README → Get a model), or set MODELS_DIR=… / BRAIN_DIR=…"
+  fi
 fi
 
 echo "── brain: reachable ──"
@@ -74,7 +89,11 @@ LLM_HOST="${LLM_HOST:-localhost}"; LLM_PORT="${LLM_PORT:-8080}"
 if curl -sf --connect-timeout 2 "http://$LLM_HOST:$LLM_PORT/v1/models" >/dev/null 2>&1; then
   ok "LLM (OpenAI API) responding on $LLM_HOST:$LLM_PORT"
 else
-  warn "no LLM on $LLM_HOST:$LLM_PORT" "start llama.cpp (./scripts/run-brain.sh) or LMStudio's server; override LLM_HOST/LLM_PORT (LMStudio defaults to 1234)"
+  if [ "$BRAIN_MODE" = "external" ]; then
+    bad "external LLM not reachable on $LLM_HOST:$LLM_PORT" "start LMStudio/llama.cpp/other OpenAI-compatible server, or set LLM_HOST/LLM_PORT/LLM_URL"
+  else
+    warn "no LLM on $LLM_HOST:$LLM_PORT" "start llama.cpp (./scripts/run-brain.sh) or LMStudio's server; override LLM_HOST/LLM_PORT (LMStudio defaults to 1234)"
+  fi
 fi
 
 echo "── guest VM ──"

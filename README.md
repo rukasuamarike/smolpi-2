@@ -53,6 +53,7 @@ cmake --build llama.cpp/build -j --target llama-server
 # 3. Get a model — drop a .gguf into ./models/ (see "Get a model" below)
 
 # 4. Preflight — confirm everything is wired before booting
+#    For LMStudio / external OpenAI-compatible servers, set BRAIN_MODE=external.
 make doctor
 
 # 5. Run
