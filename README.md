@@ -163,10 +163,39 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 - **Apple Silicon** — Metal auto-enables at build time, so the default build yields a Metal-accelerated
   `llama-server` on M-series Macs.
 
+## 🧭 Harness direction
+
+The immediate goal is **not** custom LoRA training or clever post-training. Those only compound after the
+base harness produces reliable, observable trajectories. First target: get to **at least L1 on every
+category** in `~/study/notes/HARNESS_RUBRIC.md`; then push toward **L2** on the high-leverage axes:
+latency, reliability, tool design, context/memory, verification/evals, observability, and permission/alignment
+feedback.
+
+Permissions are treated as more than safety popups. A permission point is an alignment/evaluation checkpoint:
+the agent should explain its intended outcome, uncertainty, knowledge gaps, and safer alternatives; the user
+can approve, deny, or redirect; that feedback becomes trace data the harness can use to improve future
+decisions. The point is not micromanagement — it is building a compounding feedback loop where the model can
+push back with reasons and learn from high-signal corrections.
+
+Near-term priorities:
+- **Basic reliability and ease of use before training** — boot cleanly, diagnose cleanly, recover from tool
+  errors, and make the happy path boring.
+- **Richer context windows with measurement** — increase usable context only alongside token/latency logs,
+  semantic task-state compaction, and budgeted memory injection.
+- **Tool use that feels real** — stricter structured actions, actionable tool errors, and evals that prove
+  shell/browser/MCP paths work.
+- **Streaming outputs** — reduce perceived latency and expose progress while keeping final replies parseable.
+- **Permission checkpoints as alignment data** — sparse, risk-triggered checkpoints with decision records,
+  not approval fatigue.
+
 ## 🛣️ Roadmap
-- [ ] **iPhone deployment** — Gemma 4 E4B Q2_K (~1.5 GB) fits iPhone 13/14; Q4_K_M fits 15 Pro+.
+- [ ] **L1 harness baseline** — streaming, validated actions, span logs, permission checkpoints, and a tiny
+      eval suite covering every rubric category.
+- [ ] **L2 focus areas** — richer context/task-state compaction, better tool schemas, in-loop verification,
+      and research/coding workflows measured by evals.
 - [ ] **Learned orchestration** — choose parallel tool/skill combos by logged token efficiency
-      (`docs/ORCHESTRATION_DESIGN.md`).
+      (`docs/ORCHESTRATION_DESIGN.md`) after the eval/logging substrate is trustworthy.
+- [ ] **iPhone deployment** — Gemma 4 E4B Q2_K (~1.5 GB) fits iPhone 13/14; Q4_K_M fits 15 Pro+.
 - [ ] **NPU offload** on Apple Silicon; **multi-agent** soups over a shared bridge.
 
 ## 👨‍🔬 Author
