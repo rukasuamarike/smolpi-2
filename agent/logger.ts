@@ -46,6 +46,21 @@ interface SpanRec {
   metadata: Record<string, unknown>;
 }
 
+interface ObservationRec {
+  type: "observation";
+  trace_id: string;
+  span_id: string;
+  ts: string;
+  session: string;
+  config: string;
+  turn: number;
+  step: number;
+  tool: string;
+  status: "ok" | "error";
+  chars: number;
+  preview: string;
+}
+
 interface SessionStartRec {
   type: "session_start";
   trace_id: string;
@@ -56,7 +71,7 @@ interface SessionStartRec {
   tool_specs: { name: string; args: string; description: string }[];
 }
 
-type LogRec = LlmRec | SpanRec | SessionStartRec;
+type LogRec = LlmRec | SpanRec | ObservationRec | SessionStartRec;
 
 export class SessionLogger {
   readonly session = new Date().toISOString().replace(/[:.]/g, "-");
@@ -139,6 +154,30 @@ export class SessionLogger {
     if (p.parentSpanId) rec.parent_span_id = p.parentSpanId;
     if (p.errorClass) rec.error_class = p.errorClass;
     this.spans.push(rec);
+    await this.append(rec);
+  }
+
+  // Checkpoint the tool observation immediately after execution so a crash-recovered
+  // session can determine exactly which step was in flight. The preview (first 200
+  // chars) is enough for debugging without bloating the log with full tool outputs.
+  async logObservation(p: {
+    turn: number; step: number; spanId: string;
+    tool: string; status: "ok" | "error"; chars: number; preview: string;
+  }): Promise<void> {
+    const rec: ObservationRec = {
+      type: "observation",
+      trace_id: this.traceId,
+      span_id: p.spanId,
+      ts: new Date().toISOString(),
+      session: this.session,
+      config: this.config,
+      turn: p.turn,
+      step: p.step,
+      tool: p.tool,
+      status: p.status,
+      chars: p.chars,
+      preview: p.preview,
+    };
     await this.append(rec);
   }
 

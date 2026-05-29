@@ -1,0 +1,6 @@
+- Emit EXACTLY ONE action per reply and wait for its Observation before acting again.
+- `<done/>` is terminal: once issued, execution stops. Never combine an action with `<done/>`.
+- Tool errors appear as `Observation: [exit N]...` or `Observation: ERROR:...` — treat as information, not crashes.
+- Use `.pi/progress.md` for milestone notes; write goal, current state, last commands, open risks, and next step after each major subtask.
+- Never expose secrets, credentials, or API keys in action arguments, replies, or `progress.md`.
+- Re-read files when you need current content — do not invent or infer file contents from memory.

@@ -7,6 +7,7 @@ import {
 import { ExtensionHost } from "./extensions/host";
 import { parseAction, type Action } from "./action";
 import { insertCompactionNotice, messageChars, trimContext, type Message } from "./context";
+import { compactLargeObservations, formatObservation } from "./observation";
 import { classifyActionRisk } from "./policy";
 import { parseSseBuffer } from "./sse";
 import type { McpBridge } from "./mcp/bridge"; // type-only: erased at compile time, no SDK at runtime
@@ -17,6 +18,9 @@ const LLM_URL = LLM_BASE.replace(/\/+$/, "") + "/v1/chat/completions";
 const MODEL = process.env.LLM_MODEL ?? "gemma-4";
 const BROWSER_BIN = process.env.BROWSER_BIN ?? "browser39"; // Rust single binary, no Chromium
 const APPEND_PATH = process.env.APPEND_SYSTEM_PATH ?? "/app/.pi/APPEND_SYSTEM.md";
+// AGENT_RULES.md is injected into baseSystem (never the sliding-window history)
+// so its content is pinned across all context compaction. Put load-bearing rules here.
+const AGENT_RULES_PATH = process.env.AGENT_RULES_PATH ?? `${process.cwd()}/.pi/AGENT_RULES.md`;
 const PROGRESS_PATH = process.env.PROGRESS_PATH ?? `${process.cwd()}/.pi/progress.md`;
 
 // Loop controls (env-overridable).
@@ -93,6 +97,7 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
     for (const s of toolSpecs) lines.push(`- ${s.name}(${s.args}) — ${s.description}`);
     if (EXPERIMENTAL) {
       lines.push('- delegate(task, tasks) — run independent sub-task(s) in FRESH isolated contexts; pass tasks:["a","b"] to run them IN PARALLEL. Returns only their distilled results. Use for independent research/exploration that would otherwise bloat this context.');
+      lines.push('- consolidate_memory() — summarize work history into a compact Knowledge Block; call between major subtasks when context is growing long.');
     }
     lines.push("");
   }
@@ -110,6 +115,8 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   if (EXPERIMENTAL) {
     lines.push("- Fan out independent work in parallel, then compose the results:");
     lines.push('  <tool name="delegate">{"tasks":["research X","research Y"]}</tool>');
+    lines.push("- Compact growing history into a Knowledge Block:");
+    lines.push('  <tool name="consolidate_memory"/>');
   }
   lines.push("- When the task is complete, give your final answer and end with <done/> on its own.");
   lines.push("");
@@ -138,6 +145,19 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
       lines.push("");
       lines.push("## Workspace progress (.pi/progress.md)");
       lines.push(progress.length > 4_000 ? progress.slice(0, 4_000) + "\n…[truncated]" : progress);
+    }
+  }
+
+  // Pinned rules — loaded from AGENT_RULES_PATH (.pi/AGENT_RULES.md by default).
+  // Lives in baseSystem so it is NEVER subject to sliding-window trim. Any rule
+  // that must survive a long multi-step session belongs here, not in messages[].
+  const rulesFile = Bun.file(AGENT_RULES_PATH);
+  if (await rulesFile.exists()) {
+    const rules = (await rulesFile.text()).trim();
+    if (rules) {
+      lines.push("");
+      lines.push("## Persistent Rules (survive context compaction)");
+      lines.push(rules);
     }
   }
 
@@ -413,12 +433,50 @@ async function runDelegate(args: Record<string, unknown>, baseSystem: string, ho
   return [head, ...tasks.map((t, i) => `### Delegate ${i + 1}: ${t}\n${results[i]}`)].join("\n\n");
 }
 
+// Summarize the current message history into a compact Knowledge Block and splice
+// it into the messages array in place. Allows the agent to proactively compact
+// between subtasks rather than waiting for reactive sliding-window trim.
+async function runConsolidateMemory(messages: Message[], step: number): Promise<string> {
+  const historySlice = messages.slice(2, -1); // skip sys + first_user + keep current assistant
+  if (historySlice.length < 4) {
+    return "[consolidate_memory: nothing to compact — fewer than 4 messages in history]";
+  }
+  const summaryMessages: Message[] = [
+    {
+      role: "system",
+      content: "Summarize the agent work log below into a compact Knowledge Block under 400 words. Preserve: goal, key findings, files touched, decisions made, current state, open risks, next step. Discard verbose tool outputs.",
+    },
+    {
+      role: "user",
+      content: historySlice.map((m) => `[${m.role.toUpperCase()}]\n${m.content}`).join("\n\n---\n\n"),
+    },
+  ];
+  let summary: string;
+  try {
+    const r = await llm(summaryMessages);
+    summary = r.content.trim();
+  } catch (e) {
+    return `[consolidate_memory: LLM summarization failed — ${(e as Error).message}]`;
+  }
+  messages.splice(2, historySlice.length, {
+    role: "user",
+    content: `[Knowledge Block — step ${step}, ${historySlice.length} messages compacted]\n${summary}`,
+  });
+  return `[consolidate_memory: compacted ${historySlice.length} messages → 1 Knowledge Block (${summary.length} chars)]`;
+}
+
 async function runTask(messages: Message[], logger: SessionLogger, turn: number, baseSystem: string, host: ExtensionHost): Promise<void> {
   const baseChars = baseSystem.length;
   try {
   for (let step = 1; step <= MAX_STEPS; step++) {
     const stepSpanId = logger.newSpanId();
     const stepT0 = performance.now();
+    // Proactively elide old large observations to pointers before the trim runs.
+    // Preserves the most recent observation verbatim (skipTail=1).
+    if (step > 1) {
+      const { messages: compacted, elided } = compactLargeObservations(messages);
+      if (elided > 0) messages.splice(0, messages.length, ...compacted);
+    }
     const trimT0 = performance.now();
     const beforeChars = messageChars(messages);
     const { messages: trimmed, droppedCount } = trimContext(messages, CTX_CHAR_BUDGET);
@@ -545,6 +603,9 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         if (action.name === "delegate") {
           if (!EXPERIMENTAL) obs = "ERROR: delegate is experimental; start with AGENT_EXPERIMENTAL=1.";
           else { console.log(`  ↳ delegate ${action.arg}`); obs = await runDelegate(toolArgs, baseSystem, host, logger, turn); }
+        } else if (action.name === "consolidate_memory") {
+          if (!EXPERIMENTAL) obs = "ERROR: consolidate_memory is experimental; start with AGENT_EXPERIMENTAL=1.";
+          else { console.log("  ↳ consolidate memory"); obs = await runConsolidateMemory(messages, step); }
         } else {
           console.log(`  ↳ tool ${action.name} ${action.arg}`);
           obs = await host.callTool(action.name, toolArgs);
@@ -577,8 +638,20 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         traceparent: toolTraceEnv.TRACEPARENT,
       },
     });
+    // Checkpoint: flush observation metadata to JSONL before mutating messages.
+    // A session resumed after a crash can determine exactly which step was in flight.
+    await logger.logObservation({
+      turn, step,
+      spanId: toolSpanId,
+      tool: action.kind === "tool" ? action.name : action.kind,
+      status: toolStatus,
+      chars: obs.length,
+      preview: obs.slice(0, 200),
+    });
     console.log(obs.length > 600 ? obs.slice(0, 600) + " …" : obs);
-    messages.push({ role: "user", content: `Observation:\n${obs}` });
+    // Wrap external content in a neutral delimiter to resist indirect prompt injection.
+    const toolKind = action.kind === "tool" ? action.name : action.kind;
+    messages.push({ role: "user", content: `Observation:\n${formatObservation(obs, toolKind)}` });
     await host.runTurnEnd(); // rebuild wiki metadata so writes are recallable next step
     await logger.logSpan({
       turn,
