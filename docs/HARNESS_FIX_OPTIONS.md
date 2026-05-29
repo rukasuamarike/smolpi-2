@@ -78,10 +78,16 @@ E2E testing shows streaming is not the dominant wall-clock fix for short one-sho
 ### Implemented first slice
 
 - Added no-dependency OpenAI-compatible SSE parsing in `agent/index.ts`.
-- Added `LLM_STREAM` (default on) with automatic fallback to non-streaming if `stream:true` is rejected.
-- Main agent calls stream deltas to stdout while accumulating the final reply for action parsing and JSONL logs.
-- Extended `agent/logger.ts` with `streaming` and `ttft_ms`; `/logs` summarizes streaming calls and avg TTFT.
-- Added regression test: `tests/test_llm_streaming.sh`.
+- Added `LLM_STREAM` (default on) with automatic fallback to non-streaming if `stream:true` is rejected; fallback now emits a visible warning instead of silently doubling latency.
+- Main agent calls visible `delta.content` to stdout while accumulating the final reply for action parsing and JSONL logs.
+- Thinking-model `delta.reasoning_content` is tracked separately (`reasoning_chars`) and stamps TTFT, but is deliberately not appended to actionable content; hidden-chain tool execution is a footgun.
+- Streaming token usage is recovered from `usage` when present or llama.cpp `timings.prompt_n` / `timings.predicted_n` when `usage` is absent.
+- Extended `agent/logger.ts` with `streaming`, `ttft_ms`, and `reasoning_chars`; `/logs` summarizes streaming calls and avg TTFT.
+- Added regression test: `tests/test_llm_streaming.sh` covers split SSE events, reasoning chunks, timings-derived usage, fallback warnings, and no extra dependencies.
+
+### Known blindspot
+
+This is still response streaming, not true incremental action execution. The loop waits for the visible assistant response to finish before parsing and running `<sh>/<browse>/<tool>`. The next latency step should be an incremental action detector that can close the stream once a complete action tag arrives and begin tool execution immediately, with guardrails to avoid executing examples or hidden reasoning content.
 
 ### Ideal solution
 
@@ -189,11 +195,11 @@ Start with a no-dep classifier and readline prompt. Treat false positives/negati
 
 ### Ideal solution
 
-JSONL spans for every harness phase:
+JSONL spans for every harness phase, using OpenTelemetry GenAI semantic names/attributes where practical without pulling the SDK prematurely:
 
 - `prompt.assemble`
 - `extension.before_agent_start`
-- `llm.request`
+- `gen_ai.client.operation` / `llm.request`
 - `llm.stream`
 - `action.parse`
 - `permission.decide`
@@ -201,7 +207,7 @@ JSONL spans for every harness phase:
 - `context.trim`
 - `delegate.child`
 
-Each span should include `turn`, `step`, `status`, `latency_ms`, `error_class`, and compact metadata.
+Each span should include `turn`, `step`, `status`, `latency_ms`, `error_class`, compact metadata, and OTel-compatible attributes such as `gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Keep the local JSONL queryable first; add an OTel exporter only after the span schema proves useful.
 
 ### Options
 

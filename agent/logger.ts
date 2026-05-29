@@ -21,7 +21,7 @@ interface Rec {
   ts: string; session: string; config: string; tag: string; turn: number; step: number; model: string;
   prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens: number;
   system_chars: number; injected_chars: number; latency_ms: number;
-  streaming?: boolean; ttft_ms?: number;
+  streaming?: boolean; ttft_ms?: number; reasoning_chars?: number;
   messages?: { role: string; content: string }[];
   reply?: string;
 }
@@ -38,7 +38,7 @@ export class SessionLogger {
   async log(p: {
     turn: number; step: number; model: string; usage: Usage; latencyMs: number;
     systemChars: number; baseChars: number;
-    streaming?: boolean; ttftMs?: number;
+    streaming?: boolean; ttftMs?: number; reasoningChars?: number;
     messages: { role: string; content: string }[]; reply: string; tag?: string;
   }): Promise<void> {
     const rec: Rec = {
@@ -55,6 +55,7 @@ export class SessionLogger {
     };
     if (typeof p.streaming === "boolean") rec.streaming = p.streaming;
     if (typeof p.ttftMs === "number") rec.ttft_ms = Math.round(p.ttftMs);
+    if (typeof p.reasoningChars === "number") rec.reasoning_chars = p.reasoningChars;
     if (this.withMessages) { rec.messages = p.messages; rec.reply = p.reply; }
     this.recs.push(rec);
     try {

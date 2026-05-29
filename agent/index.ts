@@ -135,7 +135,14 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   return lines.join("\n");
 }
 
-interface LlmResult { content: string; usage: Usage; latencyMs: number; streaming?: boolean; ttftMs?: number; }
+interface LlmResult {
+  content: string;
+  usage: Usage;
+  latencyMs: number;
+  streaming?: boolean;
+  ttftMs?: number;
+  reasoningChars?: number;
+}
 
 async function llm(messages: Message[]): Promise<LlmResult> {
   const t0 = performance.now();
@@ -190,6 +197,7 @@ async function llmStream(messages: Message[], onDelta?: (delta: string) => void)
   const decoder = new TextDecoder();
   let buf = "";
   let content = "";
+  let reasoningContent = "";
   let usage: Usage = {};
   let ttftMs: number | undefined;
 
@@ -204,6 +212,19 @@ async function llmStream(messages: Message[], onDelta?: (delta: string) => void)
       let data: any;
       try { data = JSON.parse(event); } catch { continue; }
       if (data.usage) usage = data.usage;
+      if (!usage.prompt_tokens && data.timings) {
+        const prompt = Number(data.timings.prompt_n ?? 0);
+        const completion = Number(data.timings.predicted_n ?? 0);
+        usage = { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion };
+      }
+      const reasoning = data.choices?.[0]?.delta?.reasoning_content ?? "";
+      if (reasoning) {
+        if (ttftMs === undefined) ttftMs = performance.now() - t0;
+        // Thinking-model reasoning is tracked for observability, but not appended
+        // to visible/action content. Executing hidden-chain tool calls would be a
+        // footgun; only explicit visible actions are parsed.
+        reasoningContent += reasoning;
+      }
       const delta = data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content ?? "";
       if (delta) {
         if (ttftMs === undefined) ttftMs = performance.now() - t0;
@@ -220,16 +241,22 @@ async function llmStream(messages: Message[], onDelta?: (delta: string) => void)
     try {
       const data = JSON.parse(event);
       if (data.usage) usage = data.usage;
+      if (!usage.prompt_tokens && data.timings) {
+        const prompt = Number(data.timings.prompt_n ?? 0);
+        const completion = Number(data.timings.predicted_n ?? 0);
+        usage = { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion };
+      }
     } catch {}
   }
-  return { content, usage, latencyMs: performance.now() - t0, streaming: true, ttftMs };
+  return { content, usage, latencyMs: performance.now() - t0, streaming: true, ttftMs, reasoningChars: reasoningContent.length };
 }
 
 async function llmWithOptionalStream(messages: Message[], onDelta?: (delta: string) => void): Promise<LlmResult> {
   if (!LLM_STREAM) return { ...(await llm(messages)), streaming: false };
   try {
     return await llmStream(messages, onDelta);
-  } catch {
+  } catch (e) {
+    console.error(`⚠ streaming failed; falling back to non-streaming: ${(e as Error).message}`);
     return { ...(await llm(messages)), streaming: false };
   }
 }
@@ -417,7 +444,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       await logger.log({
         turn, step, model: MODEL, usage: r.usage, latencyMs: r.latencyMs,
         systemChars: messages[0].content.length, baseChars, messages: sendable, reply, tag: "main",
-        streaming: r.streaming, ttftMs: r.ttftMs,
+        streaming: r.streaming, ttftMs: r.ttftMs, reasoningChars: r.reasoningChars,
       });
     } catch (e) {
       console.error(`⚠ LLM error: ${(e as Error).message}`);

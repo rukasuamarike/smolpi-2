@@ -42,11 +42,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("connection", "close")
             self.end_headers()
             chunks = [
+                {"choices": [{"delta": {"reasoning_content": "thinking before visible output"}}]},
                 {"choices": [{"delta": {"content": "STREAMING_"}}]},
-                {"choices": [{"delta": {"content": "OK <done/>"}}], "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}},
+                {"choices": [{"delta": {"content": "OK <done/>"}}]},
+                {"choices": [{"finish_reason": "stop"}], "timings": {"prompt_n": 7, "predicted_n": 2}},
             ]
             for chunk in chunks:
-                self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
+                payload = ("data: " + json.dumps(chunk) + "\n\n").encode()
+                # Split every event across writes: real HTTP may split SSE events
+                # anywhere, and the parser must buffer partial events correctly.
+                mid = max(1, len(payload) // 2)
+                self.wfile.write(payload[:mid])
+                self.wfile.flush()
+                time.sleep(0.005)
+                self.wfile.write(payload[mid:])
                 self.wfile.flush()
                 time.sleep(0.02)
             self.wfile.write(b"data: [DONE]\n\n")
@@ -102,6 +111,16 @@ if ! grep -q '"ttft_ms":' "$stream_log"; then
   cat "$stream_log" >&2
   exit 1
 fi
+if ! grep -q '"reasoning_chars":30' "$stream_log"; then
+  echo "streaming log should account for reasoning_content chunks explicitly" >&2
+  cat "$stream_log" >&2
+  exit 1
+fi
+if ! grep -q '"prompt_tokens":7' "$stream_log" || ! grep -q '"completion_tokens":2' "$stream_log"; then
+  echo "streaming log should derive token usage from llama.cpp timings when usage is absent" >&2
+  cat "$stream_log" >&2
+  exit 1
+fi
 
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
@@ -125,6 +144,11 @@ fallback_log="$(find "$fallback_logs" -name '*.jsonl' -type f | head -1)"
 if ! grep -q '"streaming":false' "$fallback_log"; then
   echo "fallback log record should mark streaming=false" >&2
   cat "$fallback_log" >&2
+  exit 1
+fi
+if ! grep -q "streaming failed; falling back to non-streaming" "$fallback_out"; then
+  echo "fallback should emit a visible warning instead of silently doubling latency" >&2
+  cat "$fallback_out" >&2
   exit 1
 fi
 

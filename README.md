@@ -112,8 +112,8 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
   server for interactive browsing. Set a server's `directTools` to promote specific tools to first-class.
 - **Soul / persona** — drop persona text into `.pi/APPEND_SYSTEM.md`; it's appended to the system prompt.
 - **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages,
-  streaming mode, and TTFT when available (post-processable into training data). `/logs` summarizes token
-  efficiency and streaming latency.
+  streaming mode, TTFT when available, and `reasoning_chars` for thinking-model streams (post-processable into
+  training data). `/logs` summarizes token efficiency and streaming latency.
 - **delegate** — with `AGENT_EXPERIMENTAL=1`, the agent can fan out independent sub-tasks in parallel via
   `<tool name="delegate">{"tasks":[…]}</tool>`; see [`docs/ORCHESTRATION_DESIGN.md`](./docs/ORCHESTRATION_DESIGN.md).
 
