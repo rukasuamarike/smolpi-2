@@ -188,7 +188,9 @@ Near-term priorities:
   CPU/RAM/disk and Smolfile CPU/RAM limits so the model can see whether failures are infrastructure pressure
   instead of prompt/protocol failure.
 - **Infrastructure headroom before protocol cleverness** — track CPU/RAM/disk and guest limits so latency or
-  task failures are not misdiagnosed as model/parser problems.
+  task failures are not misdiagnosed as model/parser problems. Current benchmark: host-direct TTFT is ~69ms
+  on Gemma 4 E4B IQ2_M CUDA, while each `smolvm exec` costs ~125ms; use long-running `make machine-run`
+  sessions for interactive latency and avoid optimizing protocol before measuring live-agent spans.
 - **Richer context windows with measurement** — increase usable context only alongside token/latency logs,
   semantic task-state compaction, and budgeted memory injection.
 - **Tool use that feels real** — stricter structured actions only when evals show plain native commands fail;

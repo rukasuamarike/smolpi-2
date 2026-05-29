@@ -71,6 +71,10 @@ Promote bash/git/text state before custom state machinery. Add a progress-file c
 
 ## Step 3 — Streaming outputs
 
+### Benchmark update
+
+E2E testing shows streaming is not the dominant wall-clock fix for short one-shot/test paths. Host-direct Gemma 4 E4B IQ2_M has ~69ms TTFT and ~103–115 tok/s generation, while `smolvm exec` adds ~125ms per invocation and guest→host round-trip averages ~216ms vs ~92ms host-only. Therefore, prioritize long-running `make machine-run` sessions and span logging over per-exec micro-optimizations. Streaming remains valuable for perceived latency and TTFT observability inside the live agent loop.
+
 ### Ideal solution
 
 OpenAI-compatible SSE streaming with graceful fallback.

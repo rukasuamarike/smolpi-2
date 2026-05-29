@@ -13,9 +13,10 @@
 ## Current context
 
 - The agent already has an autonomous multi-step loop, timeout-bounded shell, extension host, MCP proxy bridge, and JSONL LLM-call logs.
-- `make doctor` currently fails on runnable brain readiness in this checkout: no built `llama-server`, no `.gguf` in `./models`, no LLM responding on `127.0.0.1:8080`, and no VM yet.
+- Current E2E baseline is green: `make doctor` reports 22 ok / 0 warnings / 0 failures; native substrate tests, external brain test, and `make test` pass.
 - The README now frames permission points as alignment/evaluation opportunities: the model should explain intent, uncertainty, and alternatives, and the user's feedback should compound into policy/evals.
 - Quantifiable target: reach at least L1 on all categories in `~/study/notes/HARNESS_RUBRIC.md`; then target L2 first for latency, quality/reliability, context/memory, tool design, verification/evals, observability, and permissions-as-feedback.
+- Latency benchmark in `docs/LATENCY_BENCHMARK.md`: host-direct TTFT averages ~69ms and long-output throughput is ~103–115 tok/s on Gemma 4 E4B IQ2_M CUDA; `smolvm exec` adds ~125ms per invocation and guest→host LLM round-trip averages ~216ms vs ~92ms host-only.
 
 ## Tonight's north star
 
@@ -23,8 +24,8 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 1. It boots or clearly tells the user what external brain to point at.
 2. It gives the model a robust native workspace substrate: bash, git, text progress file, and visible resource headroom.
-3. It streams model output as a thin UX layer, while keeping non-streaming fallback simple.
-4. It uses tools through the simplest validated action path that measurably reduces failures.
+3. It streams model output as a thin UX/observability layer, while keeping non-streaming fallback simple; do not confuse streaming with the main one-shot latency bottleneck.
+4. It measures live-agent latency before optimizing protocol: the current dominant short-task cost is per-invocation `smolvm exec`, not host-direct LLM inference.
 5. It captures enough trace data to evaluate every permission/tool decision.
 6. It has a tiny repeatable eval suite proving L1 behavior across all rubric categories.
 
@@ -86,7 +87,7 @@ Every new harness component must declare the model limitation it assumes. If a s
 
 ## Task 3: Add streaming chat completions
 
-**Objective:** Reduce perceived latency and make the REPL feel alive by streaming assistant tokens when the backend supports OpenAI-compatible SSE.
+**Objective:** Reduce perceived latency and make the REPL feel alive by streaming assistant tokens when the backend supports OpenAI-compatible SSE. Benchmark caveat: this is a live-agent UX/observability improvement, not the main fix for one-shot latency; `smolvm exec` spawn adds ~125ms per invocation, so tests/one-shots should avoid repeated VM execs when measuring LLM speed.
 
 **Files:**
 - Modify: `agent/index.ts`
