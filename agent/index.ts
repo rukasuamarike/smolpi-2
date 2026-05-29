@@ -44,6 +44,8 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
     "You work AUTONOMOUSLY across multiple steps: reason, take ONE action, read its result, then continue — until the task is done.",
   );
   lines.push("You have a high-performance Linux toolkit. Prefer these over basic ls/cat for speed.");
+  lines.push("Use native workspace state before inventing custom scaffolding: start substantial repo tasks with `git status --short`, inspect recent work with `git diff` and `git log --oneline -5`, and use `.pi/progress.md` for milestone notes when context may span multiple turns.");
+  lines.push("Update `.pi/progress.md` after meaningful milestones with goal, current state, last commands, open risks, and next step; this assumes small models lose task state, so delete/ignore it if evals prove native git history is enough.");
   lines.push("");
 
   for (const g of GROUP_ORDER) {

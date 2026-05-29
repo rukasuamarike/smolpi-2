@@ -41,6 +41,30 @@ else
 fi
 [ -n "$(ls -A smolvm 2>/dev/null)" ] && ok "smolvm submodule populated (vendored source)" || warn "smolvm submodule empty" "make setup  (vendored runtime source; needed only to build smolvm from source)"
 
+echo "── host resources ──"
+if have nproc; then
+  ok "host CPU: $(nproc) logical cores"
+else
+  warn "host CPU: unknown" "install coreutils or check /proc/cpuinfo manually"
+fi
+if have free; then
+  ok "host memory: $(free -h | awk '/^Mem:/ {print $2 " total, " $7 " available"}')"
+else
+  warn "host memory: unknown" "install procps or check /proc/meminfo manually"
+fi
+if have df; then
+  ok "workspace disk: $(df -h . | awk 'NR==2 {print $4 " free of " $2 " (" $5 " used)"}')"
+else
+  warn "workspace disk: unknown" "install coreutils or check filesystem free space manually"
+fi
+GUEST_CPUS="$(awk -F= '/^[[:space:]]*cpus[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Smolfile 2>/dev/null || true)"
+GUEST_MEM_MB="$(awk -F= '/^[[:space:]]*memory[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Smolfile 2>/dev/null || true)"
+if [ -n "$GUEST_CPUS" ] && [ -n "$GUEST_MEM_MB" ]; then
+  ok "Smolfile guest limits: ${GUEST_CPUS} CPU, ${GUEST_MEM_MB} MiB RAM"
+else
+  warn "Smolfile guest limits: unknown" "set cpus = N and memory = MiB in Smolfile so doctor can report guest headroom"
+fi
+
 echo "── brain: llama.cpp ──"
 if [ "$BRAIN_MODE" = "external" ]; then
   warn "external brain mode: skipping local llama.cpp build checks" "doctor will require only an OpenAI-compatible /v1/models endpoint at LLM_HOST:LLM_PORT"

@@ -1,0 +1,27 @@
+# smolpi progress
+
+Assumed model limitation: small/local models can lose task state across long runs. This file is a native text substrate, not a state-machine shrine; delete or ignore it when evals show git history and conversation context are enough.
+
+## Goal
+
+- What outcome are we trying to reach?
+
+## Current state
+
+- What is true right now?
+- What files/components matter?
+
+## Last commands
+
+```bash
+# command
+# result / important observation
+```
+
+## Open risks
+
+- What could break, block, or need user permission?
+
+## Next step
+
+- The smallest useful next action.

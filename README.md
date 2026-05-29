@@ -182,7 +182,10 @@ Near-term priorities:
 - **Basic reliability and ease of use before training** — boot cleanly, diagnose cleanly, recover from tool
   errors, and make the happy path boring.
 - **Native primitives before bespoke scaffolding** — prefer bash, git, and plain text progress files for
-  state/rollback before custom databases, state machines, or multi-agent orchestration.
+  state/rollback before custom databases, state machines, or multi-agent orchestration. The tracked template
+  is `.pi/progress.md.example`; copy it to `.pi/progress.md` for local task state. The live progress file is
+  gitignored on purpose, while `make doctor` reports host CPU/RAM/disk and Smolfile CPU/RAM limits so the
+  model can see whether failures are infrastructure pressure instead of prompt/protocol failure.
 - **Infrastructure headroom before protocol cleverness** — track CPU/RAM/disk and guest limits so latency or
   task failures are not misdiagnosed as model/parser problems.
 - **Richer context windows with measurement** — increase usable context only alongside token/latency logs,
