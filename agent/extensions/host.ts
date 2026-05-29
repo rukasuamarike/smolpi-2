@@ -91,6 +91,7 @@ const CONFIG_PATH =
 
 export class ExtensionHost {
   private loaded: LoadedExt[] = [];
+  private failed: string[] = [];
   private cfg!: ExtConfig;
   private cfgDir = "";
 
@@ -163,6 +164,7 @@ export class ExtensionHost {
     } catch (e) {
       // Most common cause: missing peer dep in the guest. Fail soft.
       console.error(`[ext] ${name} failed to load (likely missing peer dep): ${(e as Error).message}`);
+      this.failed.push(name);
     }
   }
 
@@ -285,6 +287,12 @@ export class ExtensionHost {
     return this.loaded.flatMap((e) => e.tools);
   }
 
+  /** Resolved config path and extension load results — for observability spans
+   *  and startup output. Lets you see which extensions failed to load and why. */
+  diagnostics(): { configPath: string; loaded: string[]; failed: string[] } {
+    return { configPath: CONFIG_PATH, loaded: this.loaded.map((e) => e.name), failed: this.failed };
+  }
+
   summary(): string {
     if (!this.loaded.length) return "no extensions loaded";
     return this.loaded.map((e) => `${e.name}(${e.tools.length}t/${e.commands.length}c)`).join(", ");
@@ -307,7 +315,7 @@ export class ExtensionHost {
         const props = td.parameters?.properties ?? {};
         const req = td.parameters?.required ?? [];
         const args = Object.keys(props).map((k) => (req.includes(k) ? k : `${k}?`)).join(", ");
-        return { name: td.name, args, description: desc.slice(0, 140) };
+        return { name: td.name, args, description: desc.slice(0, 400) };
       }),
     );
   }

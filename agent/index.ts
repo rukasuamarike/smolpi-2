@@ -106,8 +106,10 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   lines.push("Emit EXACTLY ONE action per reply, then stop and wait for its `Observation:`. Do not invent observations.");
   lines.push("- Shell (RUNS the command; may span multiple lines):");
   lines.push("  <sh>grep -rn TODO src/</sh>");
-  lines.push("- Fetch a URL as Markdown:");
-  lines.push("  <browse>https://example.com</browse>");
+  if (active.some((c) => c.name === "browse")) {
+    lines.push("- Fetch a URL as Markdown:");
+    lines.push("  <browse>https://example.com</browse>");
+  }
   if (toolSpecs.length || EXPERIMENTAL) {
     lines.push("- Call a memory/knowledge tool (arguments as JSON):");
     lines.push('  <tool name="memctx_search">{"query":"how is auth handled"}</tool>');

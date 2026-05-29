@@ -147,6 +147,63 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 
 ---
 
+## 🧪 Testing & model evaluation
+
+The probe suite in `tests/stress_probe.sh` covers six sections. Run them against the live stack to
+get a measured baseline whenever you change the model, quantisation, or harness.
+
+```bash
+# ── No LLM needed ───────────────────────────────────────────────────────────────
+make test-probe-quick          # action-parsing unit tests only (19 cases, ~1 s)
+
+# ── Full suite — requires ./scripts/run-brain.sh to be running ──────────────────
+make test-probe                # all six sections (llm + parsing + context + streaming + tools + recovery)
+make test-probe SECTION=llm    # throughput, TTFT distribution, concurrent load, model-quality probes
+make test-probe SECTION=streaming   # mock-server adversarial streaming (jitter, reasoning-only, usage capture)
+make test-probe SECTION=recovery    # malformed LLM responses (500, empty content, 50 k reply)
+
+# ── Latency breakdown ───────────────────────────────────────────────────────────
+bash tests/test_e2e_latency.sh # TTFT distribution, tok/s, harness overhead per span
+
+# ── One-shot agent probes (tune AGENT_TASK to target a specific action type) ────
+BUN=~/.bun/bin/bun
+LLM_OPTS="LLM_URL=http://127.0.0.1:8080 LLM_MODEL=gemma-4-E4B-it-UD-IQ2_M APPEND_SYSTEM_PATH=/tmp/nonexistent.md"
+# sh-elicit probe (expect <sh>…</sh> → observation → <done/>)
+$LLM_OPTS AGENT_MAX_STEPS=3 AGENT_TASK="List TypeScript files in agent/" $BUN run agent/index.ts
+# pure-knowledge probe (expect direct answer + <done/>, no shell)
+$LLM_OPTS AGENT_MAX_STEPS=2 AGENT_TASK="What is a Python list comprehension?" $BUN run agent/index.ts
+# error-recovery probe (expect graceful observation after [exit 1])
+$LLM_OPTS AGENT_MAX_STEPS=3 AGENT_TASK="Show first 3 lines of /tmp/no_such_file.txt" $BUN run agent/index.ts
+# MCP discovery probe (expect mcp tool call, listing, then usage)
+$LLM_OPTS AGENT_MAX_STEPS=5 AGENT_TASK="List available MCP tools then call browser39" $BUN run agent/index.ts
+```
+
+### Baseline (Gemma 4 E4B IQ2_M, RTX 5080, 2026-05-29)
+
+| Metric | Value | Section |
+|--------|-------|---------|
+| Parsing pass rate | 19 / 19 | `parsing` |
+| Model quality pass rate | 5 / 8 | `llm` (direct LLM, no harness) |
+| Streaming TTFT (median) | ~96 ms | `llm` |
+| KV-cache hit (stable prefix) | ~93 % | span logs |
+| Avg LLM latency, 1-step task | ~466 ms | span logs |
+| Avg LLM latency, 4-step task | ~2203 ms | span logs (context growth) |
+| sh-elicit: correct first try | ✓ | one-shot probe |
+| Error recovery: no crash | ✓ | `recovery` |
+| MCP cold-start success rate | ~1 / 3 steps | one-shot probe |
+
+Known model behaviours to watch in regression runs (not harness bugs):
+- Direct LLM `no double action` FAIL: model emits `<sh>…</sh> <done/>` in one reply when both are
+  requested in the same turn; the harness correctly treats the reply as `done` and skips the sh.
+- MCP first-step hallucination: model may guess `mcp_list` / `mcp_search` before landing on `mcp`;
+  recovers in ≤2 extra steps once the error message echoes the available tool name.
+- Silent error termination: on `[exit 1]` with no obvious fallback, model emits bare `<done/>` without
+  a human-readable explanation; add a few-shot example to `.pi/APPEND_SYSTEM.md` to improve this.
+
+Full trace analysis and issue log: [`docs/E2E_TEST_FINDINGS.md`](./docs/E2E_TEST_FINDINGS.md).
+
+---
+
 ## 🔧 Troubleshooting
 
 **First step is always `make doctor`.** Common failures:

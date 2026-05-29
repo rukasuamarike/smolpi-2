@@ -32,7 +32,8 @@ else
 fi
 have git     && ok "git"     || bad "git missing" "install git"
 have git-lfs && ok "git-lfs" || warn "git-lfs missing" "smolvm/llama.cpp submodules ship libs via LFS; without it 'make setup' leaves them as pointer files. install: sudo apt install git-lfs && git lfs install"
-have bun     && ok "bun $(bun --version 2>/dev/null)" || warn "bun not on host" "needed for 'make setup' (bun install wires extension shims + the MCP SDK, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"
+BUN_BIN="$(command -v bun 2>/dev/null || echo "${HOME}/.bun/bin/bun")"
+if [ -x "$BUN_BIN" ]; then ok "bun $("$BUN_BIN" --version 2>/dev/null) ($BUN_BIN)"; else warn "bun not found" "needed for 'make setup' (bun install wires extension shims + the MCP SDK, mounted into the guest) and to run the agent on the host: curl -fsSL https://bun.sh/install | bash"; fi
 # smolvm's linux release links GPU-enabled libkrun → libvirglrenderer needed at load time (CLI + packed binaries)
 if ldconfig -p 2>/dev/null | grep -q 'libvirglrenderer\.so\.1'; then
   ok "libvirglrenderer (libkrun runtime dep)"

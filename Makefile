@@ -120,6 +120,17 @@ test-smol-net:
 test: test-smol-net
 	@echo "==> Tests complete"
 
+# Run the action-parsing unit tests — no LLM required, completes in ~1 s.
+test-probe-quick:
+	@bash tests/stress_probe.sh parsing
+
+# Full model probe suite (all sections). Requires llama-server running on :8080.
+# Sections: llm (throughput/TTFT/quality) | parsing | context | streaming | tools | recovery
+# Run a single section: make test-probe SECTION=llm
+SECTION ?= all
+test-probe:
+	@bash tests/stress_probe.sh $(SECTION)
+
 # ── Cleanup ──────────────────────────────────────────────────
 clean:
 	rm -f $(PACK_BIN) $(PACK_BIN).smolmachine
