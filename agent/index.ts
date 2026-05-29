@@ -276,8 +276,8 @@ async function browse(url: string): Promise<string> {
   return out || "(no output)";
 }
 
-async function shell(cmd: string): Promise<string> {
-  const proc = Bun.spawn(["bash", "-c", cmd], { stdout: "pipe", stderr: "pipe" });
+async function shell(cmd: string, traceEnv: Record<string, string> = {}): Promise<string> {
+  const proc = Bun.spawn(["bash", "-c", cmd], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...traceEnv } });
   // Hard timeout: a command blocking on stdin must not hang the agent forever.
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -481,6 +481,8 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
   const baseChars = baseSystem.length;
   try {
   for (let step = 1; step <= MAX_STEPS; step++) {
+    const stepSpanId = logger.newSpanId();
+    const stepT0 = performance.now();
     const trimT0 = performance.now();
     const beforeChars = messageChars(messages);
     const sendable = trimContext(messages);
@@ -488,6 +490,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       turn,
       step,
       span: "context.trim",
+      parentSpanId: stepSpanId,
       latencyMs: performance.now() - trimT0,
       metadata: {
         before_chars: beforeChars,
@@ -513,6 +516,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         turn,
         step,
         span: "llm.request",
+        parentSpanId: stepSpanId,
         latencyMs: r.latencyMs,
         metadata: {
           "gen_ai.system": "openai",
@@ -526,6 +530,16 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         },
       });
     } catch (e) {
+      await logger.logSpan({
+        turn,
+        step,
+        span: "agent.step",
+        spanId: stepSpanId,
+        status: "error",
+        latencyMs: performance.now() - stepT0,
+        errorClass: errorClass(e),
+        metadata: { stop_reason: "llm_error" },
+      });
       console.error(`⚠ LLM error: ${(e as Error).message}`);
       return; // back to prompt; do not kill the REPL
     }
@@ -539,6 +553,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       turn,
       step,
       span: "action.parse",
+      parentSpanId: stepSpanId,
       latencyMs: performance.now() - parseT0,
       metadata: {
         action_kind: action?.kind ?? "none",
@@ -547,24 +562,37 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
     });
     if (!action || action.kind === "done") {
       if (action?.kind === "done") console.log("✓ done");
+      await logger.logSpan({
+        turn,
+        step,
+        span: "agent.step",
+        spanId: stepSpanId,
+        latencyMs: performance.now() - stepT0,
+        metadata: { stop_reason: action?.kind === "done" ? "done" : "no_action" },
+      });
       return;
     }
 
+    const permT0 = performance.now();
     await logger.logSpan({
       turn,
       step,
       span: "permission.decide",
-      latencyMs: 0,
+      parentSpanId: stepSpanId,
+      latencyMs: performance.now() - permT0,
       metadata: {
         action_kind: action.kind,
         policy: "auto_allow",
         risk_class: action.kind === "sh" || action.kind === "browse" ? "read_only_or_workspace" : "tool",
+        latency_source: "measured",
       },
     });
 
     let obs: string;
     let toolStatus: "ok" | "error" = "ok";
     let toolErr: string | undefined;
+    const toolSpanId = logger.newSpanId();
+    const toolTraceEnv = logger.traceEnv(toolSpanId, stepSpanId);
     const toolT0 = performance.now();
     try {
       if (action.kind === "browse") {
@@ -582,7 +610,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         }
       } else {
         console.log(`  ↳ $ ${action.arg.replace(/\n/g, " ⏎ ")}`);
-        obs = await shell(action.arg);
+        obs = await shell(action.arg, toolTraceEnv);
       }
       if (obs.startsWith("ERROR") || obs.startsWith("[exit ") || obs.startsWith("[timed out")) toolStatus = "error";
     } catch (e) {
@@ -594,6 +622,8 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       turn,
       step,
       span: "tool.call",
+      spanId: toolSpanId,
+      parentSpanId: stepSpanId,
       status: toolStatus,
       latencyMs: performance.now() - toolT0,
       errorClass: toolErr,
@@ -602,11 +632,23 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         tool_name: action.kind === "tool" ? action.name : action.kind,
         arg_chars: action.kind === "tool" ? action.arg.length : action.arg.length,
         output_chars: obs.length,
+        trace_context_env: true,
+        traceparent: toolTraceEnv.TRACEPARENT,
       },
     });
     console.log(obs.length > 600 ? obs.slice(0, 600) + " …" : obs);
     messages.push({ role: "user", content: `Observation:\n${obs}` });
     await host.runTurnEnd(); // rebuild wiki metadata so writes are recallable next step
+    await logger.logSpan({
+      turn,
+      step,
+      span: "agent.step",
+      spanId: stepSpanId,
+      status: toolStatus,
+      latencyMs: performance.now() - stepT0,
+      errorClass: toolErr,
+      metadata: { stop_reason: "continue", action_kind: action.kind },
+    });
   }
   console.log(`(stopped: hit ${MAX_STEPS}-step budget — refine the task or raise AGENT_MAX_STEPS)`);
   } finally {

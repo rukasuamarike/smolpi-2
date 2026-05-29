@@ -114,7 +114,9 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 - **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages,
   streaming mode, TTFT when available, `reasoning_chars` for thinking-model streams, and local OTel-shaped
   span records (`prompt.assemble`, `llm.request`, `action.parse`, `tool.call`, `context.trim`, etc.) for
-  eval/debug analysis. `/logs` summarizes token efficiency, streaming latency, and session span count.
+  eval/debug analysis. Each record carries a `trace_id`; spans carry unique `span_id` plus optional
+  `parent_span_id`, and shell actions receive `TRACEPARENT` / `SMOLPI_TRACE_ID` env vars so external scripts
+  can correlate their own logs. `/logs` summarizes token efficiency, streaming latency, and session span count.
 - **delegate** — with `AGENT_EXPERIMENTAL=1`, the agent can fan out independent sub-tasks in parallel via
   `<tool name="delegate">{"tasks":[…]}</tool>`; see [`docs/ORCHESTRATION_DESIGN.md`](./docs/ORCHESTRATION_DESIGN.md).
 
@@ -200,7 +202,8 @@ Near-term priorities:
   actionable tool errors and evals prove shell/browser/MCP paths work.
 - **Streaming outputs** — reduce perceived latency and expose progress while keeping final replies parseable.
 - **Local span observability before SDKs** — keep OTel-shaped GenAI attributes in JSONL first (`llm.request`,
-  `tool.call`, `context.trim`, `permission.decide`) and add an exporter only after those spans drive evals.
+  `tool.call`, `context.trim`, `permission.decide`), preserve parent/child span IDs for nested traces, pass
+  trace context into spawned tools, and add SQL/outcome linkage only after those spans drive evals.
 - **Permission checkpoints as alignment data** — sparse, risk-triggered checkpoints with decision records,
   not approval fatigue.
 
@@ -208,7 +211,7 @@ Near-term priorities:
 - [ ] **L1 harness baseline** — external/local brain readiness, native bash/git/text-file state,
       resource-headroom checks, streaming, span logs, sparse permission checkpoints, and a tiny eval suite.
 - [ ] **L2 focus areas** — richer context/task-state compaction, better tool schemas only where evals show
-      native commands fail, in-loop verification, and research/coding workflows measured by evals.
+      native commands fail, in-loop verification, outcome-linked traces/queryable trace summaries, and research/coding workflows measured by evals.
 - [ ] **Learned orchestration** — choose parallel tool/skill combos by logged token efficiency
       (`docs/ORCHESTRATION_DESIGN.md`) after the eval/logging substrate is trustworthy.
 - [ ] **iPhone deployment** — Gemma 4 E4B Q2_K (~1.5 GB) fits iPhone 13/14; Q4_K_M fits 15 Pro+.

@@ -207,11 +207,17 @@ JSONL spans for every harness phase, using OpenTelemetry GenAI semantic names/at
 - `context.trim`
 - `delegate.child`
 
-Each span should include `turn`, `step`, `status`, `latency_ms`, `error_class`, compact metadata, and OTel-compatible attributes such as `gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Keep the local JSONL queryable first; add an OTel exporter only after the span schema proves useful.
+Each span should include `trace_id`, `span_id`, optional `parent_span_id`, `turn`, `step`, `status`, `latency_ms`, `error_class`, compact metadata, and OTel-compatible attributes such as `gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Keep the local JSONL queryable first; add an OTel exporter only after the span schema proves useful.
 
 ### Implemented first slice
 
-`agent/logger.ts` now writes `type:"span"` records alongside `type:"llm"` call records, and `/logs` reports session span count while all-time token summaries ignore span rows. The current implementation logs `prompt.assemble`, per-extension `extension.before_agent_start`, `context.trim`, `llm.request`, `action.parse`, `permission.decide` (auto-allow metadata placeholder), and `tool.call`. `tests/test_span_logging.sh` drives a two-step mock LLM task and verifies OTel GenAI metadata plus a successful shell `tool.call` span.
+`agent/logger.ts` now writes `type:"span"` records alongside `type:"llm"` call records, and `/logs` reports session span count while all-time token summaries ignore span rows. The current implementation logs `prompt.assemble`, per-extension `extension.before_agent_start`, `agent.step`, `context.trim`, `llm.request`, `action.parse`, measured `permission.decide` (auto-allow policy metadata), and `tool.call`. Records share a `trace_id`; spans have unique `span_id` values and step children point at `agent.step` via `parent_span_id`. Shell tools receive W3C-ish `TRACEPARENT` plus `SMOLPI_TRACE_ID` / `SMOLPI_SPAN_ID` env vars for lightweight distributed correlation. `tests/test_span_logging.sh` drives a two-step mock LLM task and verifies hierarchy, trace propagation metadata, OTel GenAI metadata, TTFT sanity, and a successful shell `tool.call` span.
+
+### Next observability gaps
+
+- Queryability: keep JSONL as the source of truth, then add a tiny SQLite/duckdb import/query command rather than an SDK hydra.
+- Outcome linkage: eval runs should append outcome/eval score records keyed by `trace_id` so failed regressions can pull their exact spans.
+- Remote MCP propagation: when MCP calls become HTTP/subprocess-visible, pass `traceparent` into those transports just like shell actions.
 
 ### Options
 

@@ -209,7 +209,9 @@ Every new harness component must declare the model limitation it assumes. If a s
 4. Add `/logs` span count summary without changing the existing token-efficiency view.
 5. Verify one sample task produces spans that identify every step.
 
-**Status:** Implemented in commit TBD with local JSONL span records (`type:"span"`) alongside LLM records (`type:"llm"`). Covered spans: `prompt.assemble`, per-extension `extension.before_agent_start`, `context.trim`, `llm.request`, `action.parse`, `permission.decide` (currently auto-allow metadata only), and `tool.call`. `llm.request` metadata uses OTel GenAI semantic names (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`) without pulling an SDK/exporter yet.
+**Status:** Implemented in commit TBD with local JSONL span records (`type:"span"`) alongside LLM records (`type:"llm"`). Covered spans: `prompt.assemble`, per-extension `extension.before_agent_start`, `agent.step`, `context.trim`, `llm.request`, `action.parse`, measured `permission.decide` (currently auto-allow metadata only), and `tool.call`. `llm.request` metadata uses OTel GenAI semantic names (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`) without pulling an SDK/exporter yet. Every record carries a `trace_id`; spans carry `span_id` and optional `parent_span_id`; shell tool calls receive `TRACEPARENT` / `SMOLPI_TRACE_ID` env vars for lightweight distributed correlation.
+
+**Carried forward:** add queryable trace import/search (SQLite/duckdb) and outcome/eval-score records keyed by `trace_id` after the tiny eval suite exists.
 
 **Expected result:** Observability reaches L1/L2 boundary.
 
@@ -325,7 +327,8 @@ Every new harness component must declare the model limitation it assumes. If a s
 4. Task 6: span logging foundation, including resource and tool timing spans. ✅ first slice implemented.
 5. Task 9: tiny eval suite.
 6. Task 4/5: action protocol + permission checkpoint v0 only where evals show failures or risk.
-7. Smolfile mount consolidation: current `[dev].volumes` still uses five mounts (`agent`, `scripts`, `.pi`, `extensions`, `node_modules`). Investigate/fix the 5-mount IRQ limit by consolidating read-only bind mounts or moving guest dependencies into the snapshot before adding more volumes.
+7. Queryable trace/outcome bridge: after Task 9 exists, append eval outcome records keyed by `trace_id` and add a tiny SQLite/duckdb import/query path so the agent can inspect prior failure traces without grep archaeology.
+8. Smolfile mount consolidation: current `[dev].volumes` still uses five mounts (`agent`, `scripts`, `.pi`, `extensions`, `node_modules`). Investigate/fix the 5-mount IRQ limit by consolidating read-only bind mounts or moving guest dependencies into the snapshot before adding more volumes.
 
 Do **not** start LoRA/SFT tonight. The logs are only useful for training once the harness produces reliable trajectories and labeled feedback.
 

@@ -5,6 +5,7 @@
 // which makes every line an SFT-ready (input → output) sample for post-training the
 // model later. `/logs` summarizes token efficiency for the session and over time.
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -19,6 +20,7 @@ export interface Usage {
 
 interface LlmRec {
   type: "llm";
+  trace_id: string;
   ts: string; session: string; config: string; tag: string; turn: number; step: number; model: string;
   prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens: number;
   system_chars: number; injected_chars: number; latency_ms: number;
@@ -29,6 +31,9 @@ interface LlmRec {
 
 interface SpanRec {
   type: "span";
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string;
   ts: string;
   session: string;
   config: string;
@@ -45,6 +50,7 @@ type LogRec = LlmRec | SpanRec;
 
 export class SessionLogger {
   readonly session = new Date().toISOString().replace(/[:.]/g, "-");
+  readonly traceId = randomBytes(16).toString("hex");
   private file = join(LOG_DIR, `${this.session}.jsonl`);
   private recs: LlmRec[] = [];
   private spans: SpanRec[] = [];
@@ -52,6 +58,20 @@ export class SessionLogger {
 
   constructor(private extensions: string[]) {}
   get config(): string { return this.extensions.length ? this.extensions.join("+") : "none"; }
+
+  newSpanId(): string { return randomBytes(8).toString("hex"); }
+
+  traceparent(spanId: string): string { return `00-${this.traceId}-${spanId}-01`; }
+
+  traceEnv(spanId: string, parentSpanId?: string): Record<string, string> {
+    const env: Record<string, string> = {
+      SMOLPI_TRACE_ID: this.traceId,
+      SMOLPI_SPAN_ID: spanId,
+      TRACEPARENT: this.traceparent(spanId),
+    };
+    if (parentSpanId) env.SMOLPI_PARENT_SPAN_ID = parentSpanId;
+    return env;
+  }
 
   async log(p: {
     turn: number; step: number; model: string; usage: Usage; latencyMs: number;
@@ -61,6 +81,7 @@ export class SessionLogger {
   }): Promise<void> {
     const rec: LlmRec = {
       type: "llm",
+      trace_id: this.traceId,
       ts: new Date().toISOString(), session: this.session, config: this.config,
       tag: p.tag ?? "main",
       turn: p.turn, step: p.step, model: p.model,
@@ -84,6 +105,8 @@ export class SessionLogger {
     turn: number;
     step: number;
     span: string;
+    spanId?: string;
+    parentSpanId?: string;
     status?: "ok" | "error" | "skipped";
     latencyMs?: number;
     errorClass?: string;
@@ -91,6 +114,8 @@ export class SessionLogger {
   }): Promise<void> {
     const rec: SpanRec = {
       type: "span",
+      trace_id: this.traceId,
+      span_id: p.spanId ?? this.newSpanId(),
       ts: new Date().toISOString(),
       session: this.session,
       config: this.config,
@@ -101,6 +126,7 @@ export class SessionLogger {
       latency_ms: Math.max(0, Math.round(p.latencyMs ?? 0)),
       metadata: p.metadata ?? {},
     };
+    if (p.parentSpanId) rec.parent_span_id = p.parentSpanId;
     if (p.errorClass) rec.error_class = p.errorClass;
     this.spans.push(rec);
     await this.append(rec);

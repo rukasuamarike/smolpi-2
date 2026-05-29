@@ -94,6 +94,7 @@ spans = [r for r in records if r.get("type") == "span"]
 llm = [r for r in records if r.get("type", "llm") == "llm"]
 required = {
     "prompt.assemble",
+    "agent.step",
     "context.trim",
     "llm.request",
     "action.parse",
@@ -107,11 +108,30 @@ if missing:
 if len(llm) != 2:
     raise SystemExit(f"expected 2 LLM records, saw {len(llm)}")
 for span in spans:
-    for key in ("ts", "session", "turn", "step", "span", "status", "latency_ms", "metadata"):
+    for key in ("ts", "session", "trace_id", "span_id", "turn", "step", "span", "status", "latency_ms", "metadata"):
         if key not in span:
             raise SystemExit(f"span missing {key}: {span}")
     if not isinstance(span["metadata"], dict):
         raise SystemExit(f"span metadata must be an object: {span}")
+trace_ids = {r.get("trace_id") for r in records}
+if len(trace_ids) != 1 or None in trace_ids:
+    raise SystemExit(f"every record should share one trace_id: {trace_ids}")
+span_ids = [s["span_id"] for s in spans]
+if len(span_ids) != len(set(span_ids)):
+    raise SystemExit(f"span_id values must be unique: {span_ids}")
+step_ids = {s["span_id"] for s in spans if s.get("span") == "agent.step"}
+child_spans = [s for s in spans if s.get("span") in {"context.trim", "llm.request", "action.parse", "permission.decide", "tool.call"}]
+if not child_spans or not all(s.get("parent_span_id") in step_ids for s in child_spans):
+    raise SystemExit(f"step children should carry parent_span_id pointing at agent.step: step_ids={step_ids} children={child_spans}")
+positive = [s for s in spans if s.get("span") in {"agent.step", "llm.request", "tool.call"}]
+if not positive or not all(s.get("latency_ms", 0) > 0 for s in positive):
+    raise SystemExit(f"agent.step, llm.request, and tool.call latencies must be >0: {positive}")
+perm_spans = [s for s in spans if s.get("span") == "permission.decide"]
+if not perm_spans or not all(s["metadata"].get("latency_source") == "measured" for s in perm_spans):
+    raise SystemExit(f"permission.decide should be measured, not hardcoded: {perm_spans}")
+tool_env = [s for s in spans if s.get("span") == "tool.call" and s["metadata"].get("trace_context_env")]
+if not tool_env:
+    raise SystemExit(f"tool.call should propagate trace context into spawned tools: {spans}")
 llm_spans = [s for s in spans if s.get("span") == "llm.request"]
 if not llm_spans:
     raise SystemExit("no llm.request span")

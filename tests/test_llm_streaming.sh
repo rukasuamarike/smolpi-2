@@ -121,6 +121,19 @@ if ! grep -q '"prompt_tokens":7' "$stream_log" || ! grep -q '"completion_tokens"
   cat "$stream_log" >&2
   exit 1
 fi
+python3 - "$stream_log" <<'PY'
+import json, sys
+records = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+llm = next((r for r in records if r.get("type", "llm") == "llm" and r.get("streaming") is True), None)
+span = next((r for r in records if r.get("type") == "span" and r.get("span") == "llm.request"), None)
+if not llm or not span:
+    raise SystemExit(f"missing streaming LLM record or llm.request span: {records}")
+if llm.get("ttft_ms", 0) <= 0 or llm["ttft_ms"] >= llm["latency_ms"]:
+    raise SystemExit(f"TTFT must be >0 and < total latency on LLM record: {llm}")
+meta_ttft = span.get("metadata", {}).get("ttft_ms")
+if not meta_ttft or meta_ttft <= 0 or meta_ttft >= span.get("latency_ms", 0):
+    raise SystemExit(f"TTFT must be >0 and < total latency on llm.request span: {span}")
+PY
 
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
