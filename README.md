@@ -181,19 +181,23 @@ push back with reasons and learn from high-signal corrections.
 Near-term priorities:
 - **Basic reliability and ease of use before training** — boot cleanly, diagnose cleanly, recover from tool
   errors, and make the happy path boring.
+- **Native primitives before bespoke scaffolding** — prefer bash, git, and plain text progress files for
+  state/rollback before custom databases, state machines, or multi-agent orchestration.
+- **Infrastructure headroom before protocol cleverness** — track CPU/RAM/disk and guest limits so latency or
+  task failures are not misdiagnosed as model/parser problems.
 - **Richer context windows with measurement** — increase usable context only alongside token/latency logs,
   semantic task-state compaction, and budgeted memory injection.
-- **Tool use that feels real** — stricter structured actions, actionable tool errors, and evals that prove
-  shell/browser/MCP paths work.
+- **Tool use that feels real** — stricter structured actions only when evals show plain native commands fail;
+  actionable tool errors and evals prove shell/browser/MCP paths work.
 - **Streaming outputs** — reduce perceived latency and expose progress while keeping final replies parseable.
 - **Permission checkpoints as alignment data** — sparse, risk-triggered checkpoints with decision records,
   not approval fatigue.
 
 ## 🛣️ Roadmap
-- [ ] **L1 harness baseline** — streaming, validated actions, span logs, permission checkpoints, and a tiny
-      eval suite covering every rubric category.
-- [ ] **L2 focus areas** — richer context/task-state compaction, better tool schemas, in-loop verification,
-      and research/coding workflows measured by evals.
+- [ ] **L1 harness baseline** — external/local brain readiness, native bash/git/text-file state,
+      resource-headroom checks, streaming, span logs, sparse permission checkpoints, and a tiny eval suite.
+- [ ] **L2 focus areas** — richer context/task-state compaction, better tool schemas only where evals show
+      native commands fail, in-loop verification, and research/coding workflows measured by evals.
 - [ ] **Learned orchestration** — choose parallel tool/skill combos by logged token efficiency
       (`docs/ORCHESTRATION_DESIGN.md`) after the eval/logging substrate is trustworthy.
 - [ ] **iPhone deployment** — Gemma 4 E4B Q2_K (~1.5 GB) fits iPhone 13/14; Q4_K_M fits 15 Pro+.

@@ -10,6 +10,8 @@ This document turns the high-level plan into implementation options. Bias: small
 - L2 focus areas: latency, reliability/ease-of-use, tool design, context/memory, evals, observability, permission/alignment feedback.
 - Permission checkpoints are alignment/eval data, not approval theater.
 - LoRA/SFT waits until traces are reliable and labeled.
+- **Harness obsolescence rule:** every component must state the model limitation it assumes. Prefer native primitives (bash, git, text files) and delete scaffolding when evals show the model no longer needs it.
+- **Infrastructure before protocol cleverness:** measure sandbox CPU/RAM/headroom and tool-process reliability before attributing latency or task failure to parsing/transport.
 
 ---
 
@@ -40,7 +42,34 @@ The problem is project-specific diagnosis. A generic CLI framework would add wei
 
 ---
 
-## Step 2 — Streaming outputs
+## Step 2 — Native workspace substrate: bash, git, progress file, resource headroom
+
+### Ideal solution
+
+Before adding orchestration, give the model the boring primitives it already knows.
+
+- A robust sandboxed bash terminal with clear cwd/env behavior and timeouts.
+- Git as rollback/checkpoint mechanism, not a custom undo state machine.
+- A plain progress file (for example `.pi/progress.md`) read at session start and updated after meaningful tasks.
+- Doctor/resource checks for guest CPU/RAM and host/brain headroom so failures are not misattributed to prompt/protocol issues.
+- README prompt guidance: prefer `git status`, `git diff`, `git log`, and `.pi/progress.md` before custom memory when restarting work.
+
+### Options
+
+| Option | Dependency | Pros | Cons | Verdict |
+|---|---:|---|---|---|
+| Plain bash + git + `.pi/progress.md` | none | Native LLM fluency; low obsolescence risk; easy to inspect | Less fancy retrieval | **Start here** |
+| Managed persistent shell session | none / Bun child process | Preserves cwd/env/processes | More lifecycle complexity | Add after eval shows fresh shells hurt |
+| Custom rollback/state machine | none/new code | Fine-grained control | Rebuilds git poorly; likely obsolete | Avoid |
+| Memory DB first | existing extensions | Searchable facts | More moving parts/context injection | Use after text progress baseline |
+
+### Recommendation
+
+Promote bash/git/text state before custom state machinery. Add a progress-file convention and resource/headroom checks before any batch/code-exec architecture.
+
+---
+
+## Step 3 — Streaming outputs
 
 ### Ideal solution
 
@@ -66,7 +95,7 @@ Start with hand-rolled parser. If evals expose chunk-boundary bugs, add `eventso
 
 ---
 
-## Step 3 — Structured action protocol
+## Step 4 — Structured action protocol
 
 ### Ideal solution
 
@@ -104,7 +133,7 @@ Use manual validation or existing TypeBox. Do not add Zod/AJV yet. The action sc
 
 ---
 
-## Step 4 — Permission checkpoints as alignment/eval feedback
+## Step 5 — Permission checkpoints as alignment/eval feedback
 
 ### Ideal solution
 
@@ -144,7 +173,7 @@ Start with a no-dep classifier and readline prompt. Treat false positives/negati
 
 ---
 
-## Step 5 — Span tracing / observability
+## Step 6 — Span tracing / observability
 
 ### Ideal solution
 
@@ -177,7 +206,7 @@ Extend `agent/logger.ts`. Consider OTel only after local JSONL spans drive evals
 
 ---
 
-## Step 6 — Budgeted context assembly
+## Step 7 — Budgeted context assembly
 
 ### Ideal solution
 
@@ -203,7 +232,7 @@ Implement named blocks + char budgets now. Token-accurate budgeting can wait.
 
 ---
 
-## Step 7 — Minimal semantic task-state compaction
+## Step 8 — Minimal semantic task-state compaction
 
 ### Ideal solution
 
@@ -232,7 +261,7 @@ Start deterministic. Add model summary only at compaction thresholds.
 
 ---
 
-## Step 8 — Tiny eval suite
+## Step 9 — Tiny eval suite
 
 ### Ideal solution
 
@@ -258,7 +287,7 @@ Use Bash for integration smoke and Bun test for exported TS modules. No Vitest y
 
 ---
 
-## Step 9 — Batch/code-execution primitive
+## Step 10 — Batch/code-execution primitive
 
 ### Ideal solution
 
@@ -305,8 +334,9 @@ Nothing required.
 
 ## Immediate next commits
 
-1. `feat: stream chat completions` — no new deps, fallback to non-streaming.
-2. `refactor: introduce validated action protocol` — no new deps, XML fallback retained.
-3. `feat: log harness spans` — no new deps, JSONL spans.
-4. `feat: add permission checkpoints` — no new deps, initial heuristic policy.
-5. `test: add harness eval smoke suite` — no new deps.
+1. `feat: add native workspace progress and resource checks` — no new deps; `.pi/progress.md` convention, git-first checkpoint guidance, CPU/RAM/headroom visibility.
+2. `feat: stream chat completions` — no new deps, fallback to non-streaming; treat as thin UX layer, not core architecture.
+3. `refactor: introduce validated action protocol` — no new deps, XML fallback retained; keep protocol removable if future models follow simpler tags reliably.
+4. `feat: log harness spans` — no new deps, JSONL spans.
+5. `feat: add permission checkpoints` — no new deps, initial heuristic policy.
+6. `test: add harness eval smoke suite` — no new deps.

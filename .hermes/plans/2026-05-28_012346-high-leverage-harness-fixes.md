@@ -19,13 +19,18 @@
 
 ## Tonight's north star
 
-Do not build training pipelines yet. Make the harness pleasant, observable, and reliable:
+Do not build training pipelines yet. Make the harness pleasant, observable, and reliable. Default to primitives the model already knows and add scaffolding only after evals prove it is necessary:
 
 1. It boots or clearly tells the user what external brain to point at.
-2. It streams model output so the user sees progress immediately.
-3. It uses tools through a stricter, validated action path.
-4. It captures enough trace data to evaluate every permission/tool decision.
-5. It has a tiny repeatable eval suite proving L1 behavior across all rubric categories.
+2. It gives the model a robust native workspace substrate: bash, git, text progress file, and visible resource headroom.
+3. It streams model output as a thin UX layer, while keeping non-streaming fallback simple.
+4. It uses tools through the simplest validated action path that measurably reduces failures.
+5. It captures enough trace data to evaluate every permission/tool decision.
+6. It has a tiny repeatable eval suite proving L1 behavior across all rubric categories.
+
+## Harness obsolescence guardrail
+
+Every new harness component must declare the model limitation it assumes. If a stronger model or eval run shows the component is no longer needed, delete it. Prefer bash/git/text files over bespoke state machines; prefer resource/headroom fixes over protocol cleverness when infrastructure is the real bottleneck.
 
 ---
 
@@ -54,7 +59,32 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 2: Add streaming chat completions
+## Task 2: Add native workspace progress and resource checks
+
+**Objective:** Prefer primitives the model already knows — bash, git, text files — before custom orchestration or memory machinery.
+
+**Files:**
+- Modify: `agent/index.ts`
+- Modify: `scripts/doctor.sh`
+- Modify: `README.md`
+- Create: `.pi/progress.md.example` or similar template
+- Test: a startup prompt includes progress/git guidance; doctor reports resource headroom.
+
+**Steps:**
+1. Add a lightweight progress-file convention, e.g. `.pi/progress.md`, with sections for goal, current state, last commands, open risks, next step.
+2. Update the system prompt to tell the model to consult `git status`, `git diff`, `git log --oneline -5`, and `.pi/progress.md` before inventing custom state.
+3. Add doctor checks for host-visible resource headroom (`nproc`, memory, disk) and Smolfile guest CPU/RAM limits.
+4. Keep progress-file updates model-visible but not mandatory every turn; use it after meaningful milestones.
+5. Verify:
+   - Doctor prints CPU/RAM/disk and Smolfile limits.
+   - The prompt mentions git/text progress as the first state mechanism.
+   - No new dependencies.
+
+**Expected result:** L1 ease-of-use and context continuity with low obsolescence risk.
+
+---
+
+## Task 3: Add streaming chat completions
 
 **Objective:** Reduce perceived latency and make the REPL feel alive by streaming assistant tokens when the backend supports OpenAI-compatible SSE.
 
@@ -78,7 +108,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 3: Harden action parsing with validated structured actions
+## Task 4: Harden action parsing with validated structured actions
 
 **Objective:** Stop relying on regex tags as the only protocol; introduce a strict JSON action object while keeping legacy tags as a compatibility fallback.
 
@@ -113,7 +143,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 4: Turn permission points into alignment/eval checkpoints
+## Task 5: Turn permission points into alignment/eval checkpoints
 
 **Objective:** Add a permission decision layer that starts as feedback/evaluation infrastructure, not bureaucracy.
 
@@ -150,7 +180,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 5: Add loop-level span tracing
+## Task 6: Add loop-level span tracing
 
 **Objective:** Make failures localizable: prompt assembly, model, parser, permission, tool, observation, compaction, and extension injection should each be visible.
 
@@ -179,7 +209,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 6: Replace blunt injected-context slicing with budgeted context assembly
+## Task 7: Replace blunt injected-context slicing with budgeted context assembly
 
 **Objective:** Stop `sys.slice(0, cap)` from randomly truncating extension output; preserve structured high-value context under budget.
 
@@ -202,7 +232,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 7: Add minimal semantic task-state compaction
+## Task 8: Add minimal semantic task-state compaction
 
 **Objective:** Preserve task progress when old observations are dropped.
 
@@ -227,7 +257,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 8: Add a tiny eval suite from the break log
+## Task 9: Add a tiny eval suite from the break log
 
 **Objective:** Stop tuning by vibes. Lock in L1 behavior with repeatable checks.
 
@@ -261,7 +291,7 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 
 ---
 
-## Task 9: Add a command/batch execution primitive after permissions exist
+## Task 10: Add a command/batch execution primitive after permissions exist
 
 **Objective:** Reduce one-action-per-step overhead for mechanical tool sequences.
 
@@ -284,11 +314,11 @@ Do not build training pipelines yet. Make the harness pleasant, observable, and 
 ## Tonight's suggested execution order
 
 1. Task 1: brain readiness / ease of use.
-2. Task 2: streaming outputs.
-3. Task 3: structured action protocol compatibility layer.
-4. Task 5: span logging foundation.
-5. Task 8: tiny eval suite.
-6. Task 4: permission checkpoint v0 if time remains.
+2. Task 2: native workspace substrate — bash/git/progress file/resource checks.
+3. Task 3: streaming outputs as a thin UX improvement.
+4. Task 6: span logging foundation, including resource and tool timing spans.
+5. Task 9: tiny eval suite.
+6. Task 4/5: action protocol + permission checkpoint v0 only where evals show failures or risk.
 
 Do **not** start LoRA/SFT tonight. The logs are only useful for training once the harness produces reliable trajectories and labeled feedback.
 
