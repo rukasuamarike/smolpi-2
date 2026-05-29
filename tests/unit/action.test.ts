@@ -2,9 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { parseAction } from "../../agent/action";
 
 describe("parseAction", () => {
-  test("done beats executable tags", () => {
-    expect(parseAction("<sh>rm -rf /tmp/nope</sh> all done <done/>"))
-      .toEqual({ kind: "done" });
+  test("a live action wins over a premature <done/> in the same reply", () => {
+    // Small models routinely pair "do X" with a trailing <done/>; the action
+    // must still run (silently dropping it strands them with no observation).
+    expect(parseAction("<sh>printf ok</sh> all done <done/>"))
+      .toEqual({ kind: "sh", arg: "printf ok" });
+  });
+
+  test("<done/> is terminal only when the reply carries no action", () => {
+    expect(parseAction("Task complete. <done/>")).toEqual({ kind: "done" });
+    expect(parseAction("all done [done]")).toEqual({ kind: "done" });
   });
 
   test("earliest action wins across tool, shell, and browse tags", () => {

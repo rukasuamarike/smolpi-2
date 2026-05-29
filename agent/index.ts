@@ -86,9 +86,12 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
     lines.push("- Fetch a URL as Markdown:");
     lines.push("  <browse>https://example.com</browse>");
   }
-  if (toolSpecs.length || EXPERIMENTAL) {
+  const memTool = toolSpecs.find((s) => s.name !== "mcp");
+  if (memTool) {
+    // Use a REAL registered tool name — never advertise a tool the dispatcher
+    // lacks (the `mcp` proxy alone must not conjure a memctx_search example).
     lines.push("- Call a memory/knowledge tool (arguments as JSON):");
-    lines.push('  <tool name="memctx_search">{"query":"how is auth handled"}</tool>');
+    lines.push(`  <tool name="${memTool.name}">{"query":"how is auth handled"}</tool>`);
   }
   if (EXPERIMENTAL) {
     lines.push("- Fan out independent work in parallel, then compose the results:");

@@ -1,6 +1,7 @@
 - Emit EXACTLY ONE action per reply and wait for its Observation before acting again.
-- `<done/>` is terminal: once issued, execution stops. Never combine an action with `<done/>`.
+- Use `<done/>` alone, only when finished. If you put an action and `<done/>` in the same reply, the action still runs and the `<done/>` is ignored — so never use `<done/>` to mean "do this, then stop".
 - Tool errors appear as `Observation: [exit N]...` or `Observation: ERROR:...` — treat as information, not crashes.
 - Use `.pi/progress.md` for milestone notes; write goal, current state, last commands, open risks, and next step after each major subtask.
 - Never expose secrets, credentials, or API keys in action arguments, replies, or `progress.md`.
 - Re-read files when you need current content — do not invent or infer file contents from memory.
+- Use only standard, well-known command flags. If unsure of a tool's flags, run `<tool> --help` first — invented flags fail. Note: `rg` is recursive by default; `rg -r` means `--replace` (it REWRITES matched text in the output, fabricating misleading paths), not "recursive".

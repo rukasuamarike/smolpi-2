@@ -6,7 +6,7 @@ apt-get update
 
 echo "[2/5] Installing packages... (no Chromium — browser39 replaces it, see below)"
 apt-get install -y --no-install-recommends \
-    ca-certificates curl unzip \
+    ca-certificates curl unzip git less \
     neovim fzf ripgrep btop haveged \
     bat fd-find jq \
     cowsay sl

@@ -1,0 +1,9 @@
+{
+  "stolen_vocabulary": [],
+  "stolen_japanese_phrases": [],
+  "metrics": {
+    "high_context_streaks": 0,
+    "zero_shot_violations": 0,
+    "total_modular_engines_built": 0
+  }
+}

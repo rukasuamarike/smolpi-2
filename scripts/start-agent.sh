@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+# UTF-8 locale so TUI tools (btop, etc.) don't bail with "No UTF-8 locale
+# detected". C.UTF-8 is always present in glibc — no locale-gen needed. The
+# agent inherits this, and so do its `bash -c` <sh> child shells.
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
 export LLM_URL="${LLM_URL:-http://127.0.0.1:8080}"
 export LLM_MODEL="${LLM_MODEL:-gemma-4}"
 export BROWSER_BIN="${BROWSER_BIN:-browser39}"

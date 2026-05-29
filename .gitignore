@@ -11,6 +11,8 @@ models/
 # Local runtime state
 .pi/umi_profile.json
 .pi/progress.md
+# umi profile lives at repo root; commit example.umi_profile.json instead
+.umi_profile.json
 # Local host config (copy .env.example → .env); .env.example stays tracked
 .env
 .env.local
