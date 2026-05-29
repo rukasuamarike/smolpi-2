@@ -209,6 +209,10 @@ JSONL spans for every harness phase, using OpenTelemetry GenAI semantic names/at
 
 Each span should include `turn`, `step`, `status`, `latency_ms`, `error_class`, compact metadata, and OTel-compatible attributes such as `gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Keep the local JSONL queryable first; add an OTel exporter only after the span schema proves useful.
 
+### Implemented first slice
+
+`agent/logger.ts` now writes `type:"span"` records alongside `type:"llm"` call records, and `/logs` reports session span count while all-time token summaries ignore span rows. The current implementation logs `prompt.assemble`, per-extension `extension.before_agent_start`, `context.trim`, `llm.request`, `action.parse`, `permission.decide` (auto-allow metadata placeholder), and `tool.call`. `tests/test_span_logging.sh` drives a two-step mock LLM task and verifies OTel GenAI metadata plus a successful shell `tool.call` span.
+
 ### Options
 
 | Option | Dependency | Pros | Cons | Verdict |

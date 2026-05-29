@@ -367,6 +367,53 @@ function trimContext(messages: Message[]): Message[] {
   return head.concat(tail);
 }
 
+function messageChars(messages: Message[]): number {
+  return messages.reduce((n, m) => n + m.content.length, 0);
+}
+
+function errorClass(e: unknown): string {
+  return (e as Error)?.name || "Error";
+}
+
+async function assembleSystemForTask(
+  task: string,
+  baseSystem: string,
+  host: ExtensionHost,
+  logger: SessionLogger,
+  turn: number,
+  step = 0,
+): Promise<string> {
+  const t0 = performance.now();
+  const system = await host.beforeAgentStart(task, baseSystem, async (s) => {
+    await logger.logSpan({
+      turn,
+      step,
+      span: "extension.before_agent_start",
+      status: s.status,
+      latencyMs: s.latencyMs,
+      errorClass: s.errorClass,
+      metadata: {
+        extension: s.extension,
+        input_chars: s.inputChars,
+        output_chars: s.outputChars,
+      },
+    });
+  });
+  await logger.logSpan({
+    turn,
+    step,
+    span: "prompt.assemble",
+    latencyMs: performance.now() - t0,
+    metadata: {
+      base_system_chars: baseSystem.length,
+      system_chars: system.length,
+      injected_chars: Math.max(0, system.length - baseSystem.length),
+      extension_count: host.names().length,
+    },
+  });
+  return system;
+}
+
 // One user task → autonomous multi-step loop. Returns to the REPL on completion,
 // LLM failure, or step-budget exhaustion. Tool errors are fed back as
 // observations (the model can recover) and never crash the process.
@@ -375,7 +422,7 @@ function trimContext(messages: Message[]): Message[] {
 // Nested delegation is blocked; children are step-budgeted; calls are logged
 // with a `delegate:N` tag so their token cost is tracked separately. ──
 async function runChild(subtask: string, baseSystem: string, host: ExtensionHost, logger: SessionLogger, parentTurn: number, idx: number): Promise<string> {
-  const childSystem = await host.beforeAgentStart(subtask, baseSystem);
+  const childSystem = await assembleSystemForTask(subtask, baseSystem, host, logger, parentTurn, 0);
   const messages: Message[] = [
     { role: "system", content: childSystem },
     { role: "user", content: subtask },
@@ -434,7 +481,23 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
   const baseChars = baseSystem.length;
   try {
   for (let step = 1; step <= MAX_STEPS; step++) {
+    const trimT0 = performance.now();
+    const beforeChars = messageChars(messages);
     const sendable = trimContext(messages);
+    await logger.logSpan({
+      turn,
+      step,
+      span: "context.trim",
+      latencyMs: performance.now() - trimT0,
+      metadata: {
+        before_chars: beforeChars,
+        after_chars: messageChars(sendable),
+        before_messages: messages.length,
+        after_messages: sendable.length,
+        budget_chars: CTX_CHAR_BUDGET,
+        trimmed: sendable.length !== messages.length || messageChars(sendable) !== beforeChars,
+      },
+    });
     let reply: string;
     let streamed = false;
     try {
@@ -446,6 +509,22 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         systemChars: messages[0].content.length, baseChars, messages: sendable, reply, tag: "main",
         streaming: r.streaming, ttftMs: r.ttftMs, reasoningChars: r.reasoningChars,
       });
+      await logger.logSpan({
+        turn,
+        step,
+        span: "llm.request",
+        latencyMs: r.latencyMs,
+        metadata: {
+          "gen_ai.system": "openai",
+          "gen_ai.request.model": MODEL,
+          "gen_ai.response.model": MODEL,
+          "gen_ai.usage.input_tokens": r.usage.prompt_tokens ?? 0,
+          "gen_ai.usage.output_tokens": r.usage.completion_tokens ?? 0,
+          streaming: r.streaming === true,
+          ttft_ms: r.ttftMs,
+          reasoning_chars: r.reasoningChars ?? 0,
+        },
+      });
     } catch (e) {
       console.error(`⚠ LLM error: ${(e as Error).message}`);
       return; // back to prompt; do not kill the REPL
@@ -454,13 +533,39 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
     if (streamed) console.log("");
     else console.log(reply.trim());
 
+    const parseT0 = performance.now();
     const action = parseAction(reply);
+    await logger.logSpan({
+      turn,
+      step,
+      span: "action.parse",
+      latencyMs: performance.now() - parseT0,
+      metadata: {
+        action_kind: action?.kind ?? "none",
+        reply_chars: reply.length,
+      },
+    });
     if (!action || action.kind === "done") {
       if (action?.kind === "done") console.log("✓ done");
       return;
     }
 
+    await logger.logSpan({
+      turn,
+      step,
+      span: "permission.decide",
+      latencyMs: 0,
+      metadata: {
+        action_kind: action.kind,
+        policy: "auto_allow",
+        risk_class: action.kind === "sh" || action.kind === "browse" ? "read_only_or_workspace" : "tool",
+      },
+    });
+
     let obs: string;
+    let toolStatus: "ok" | "error" = "ok";
+    let toolErr: string | undefined;
+    const toolT0 = performance.now();
     try {
       if (action.kind === "browse") {
         console.log(`  ↳ browse ${action.arg}`);
@@ -479,9 +584,26 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         console.log(`  ↳ $ ${action.arg.replace(/\n/g, " ⏎ ")}`);
         obs = await shell(action.arg);
       }
+      if (obs.startsWith("ERROR") || obs.startsWith("[exit ") || obs.startsWith("[timed out")) toolStatus = "error";
     } catch (e) {
+      toolStatus = "error";
+      toolErr = errorClass(e);
       obs = `ERROR: ${(e as Error).message}`; // recoverable: the model sees it next step
     }
+    await logger.logSpan({
+      turn,
+      step,
+      span: "tool.call",
+      status: toolStatus,
+      latencyMs: performance.now() - toolT0,
+      errorClass: toolErr,
+      metadata: {
+        "tool.kind": action.kind,
+        tool_name: action.kind === "tool" ? action.name : action.kind,
+        arg_chars: action.kind === "tool" ? action.arg.length : action.arg.length,
+        output_chars: obs.length,
+      },
+    });
     console.log(obs.length > 600 ? obs.slice(0, 600) + " …" : obs);
     messages.push({ role: "user", content: `Observation:\n${obs}` });
     await host.runTurnEnd(); // rebuild wiki metadata so writes are recallable next step
@@ -559,7 +681,8 @@ async function agentLoop() {
       continue;
     }
     // Per-prompt memory injection (memctx Memory Gateway, hermes-memory, etc.).
-    messages[0] = { role: "system", content: await host.beforeAgentStart(input, baseSystem) };
+    const currentTurn = turn + 1;
+    messages[0] = { role: "system", content: await assembleSystemForTask(input, baseSystem, host, logger, currentTurn, 0) };
     messages.push({ role: "user", content: input });
     try {
       await runTask(messages, logger, ++turn, baseSystem, host); // never throws
@@ -580,7 +703,7 @@ async function runOneShot(task: string) {
     console.log(await SessionLogger.allTimeSummary());
     return;
   }
-  const system = await host.beforeAgentStart(task, baseSystem);
+  const system = await assembleSystemForTask(task, baseSystem, host, logger, 1, 0);
   if (process.env.DUMP_SYSTEM_PROMPT === "1") {
     console.log(system);
     return;

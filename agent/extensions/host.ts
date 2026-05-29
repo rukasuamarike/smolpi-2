@@ -227,16 +227,44 @@ export class ExtensionHost {
 
   /** Chain `before_agent_start` injections for this prompt; returns the
    *  augmented system prompt, capped by the policy's injected-context budget. */
-  async beforeAgentStart(prompt: string, systemPrompt: string): Promise<string> {
+  async beforeAgentStart(
+    prompt: string,
+    systemPrompt: string,
+    onSpan?: (span: {
+      extension: string;
+      latencyMs: number;
+      status: "ok" | "error";
+      errorClass?: string;
+      inputChars: number;
+      outputChars: number;
+    }) => Promise<void> | void,
+  ): Promise<string> {
     const ctx = this.buildCtx();
     let sys = systemPrompt;
     for (const ext of this.loaded)
       for (const h of ext.hooks.get("before_agent_start") ?? []) {
+        const t0 = performance.now();
+        const inputChars = sys.length;
         try {
           const out = (await h({ prompt, systemPrompt: sys }, ctx)) as { systemPrompt?: string } | undefined;
           if (out?.systemPrompt) sys = out.systemPrompt;
+          await onSpan?.({
+            extension: ext.name,
+            latencyMs: performance.now() - t0,
+            status: "ok",
+            inputChars,
+            outputChars: sys.length,
+          });
         } catch (e) {
           console.error(`[ext] ${ext.name} before_agent_start: ${(e as Error).message}`);
+          await onSpan?.({
+            extension: ext.name,
+            latencyMs: performance.now() - t0,
+            status: "error",
+            errorClass: (e as Error).name || "Error",
+            inputChars,
+            outputChars: sys.length,
+          });
         }
       }
     const cap = systemPrompt.length + this.cfg.policy.maxInjectedContextChars;

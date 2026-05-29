@@ -112,8 +112,9 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
   server for interactive browsing. Set a server's `directTools` to promote specific tools to first-class.
 - **Soul / persona** — drop persona text into `.pi/APPEND_SYSTEM.md`; it's appended to the system prompt.
 - **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages,
-  streaming mode, TTFT when available, and `reasoning_chars` for thinking-model streams (post-processable into
-  training data). `/logs` summarizes token efficiency and streaming latency.
+  streaming mode, TTFT when available, `reasoning_chars` for thinking-model streams, and local OTel-shaped
+  span records (`prompt.assemble`, `llm.request`, `action.parse`, `tool.call`, `context.trim`, etc.) for
+  eval/debug analysis. `/logs` summarizes token efficiency, streaming latency, and session span count.
 - **delegate** — with `AGENT_EXPERIMENTAL=1`, the agent can fan out independent sub-tasks in parallel via
   `<tool name="delegate">{"tasks":[…]}</tool>`; see [`docs/ORCHESTRATION_DESIGN.md`](./docs/ORCHESTRATION_DESIGN.md).
 
@@ -155,7 +156,7 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 | `ERROR: No .gguf files in models/` | no weights → download a GGUF into `./models/` |
 | GPU not used / very slow | `--list-devices` shows no backend → rebuild llama.cpp with `-DGGML_CUDA=ON` (or Metal/Vulkan) |
 | `test-brain` / guest TIMEOUT | brain not on `0.0.0.0:8080`, or WSL2 mirrored networking off → start `run-brain.sh`; `make test-smol-net` diagnoses |
-| Soul / extensions don't load in guest | `.pi` not reaching the guest → `Smolfile` `[dev]` must mount `./.pi:/app/.pi:ro` (doctor checks this) |
+| Soul / extensions / progress don't load in guest | `.pi` not reaching the guest → `Smolfile` `[dev]` must mount `./.pi:/app/.pi` writable (doctor checks this) |
 | Empty `/proc/net/tcp` in guest | not a bug — libkrun TSI proxies sockets at the syscall layer |
 
 ---
@@ -198,6 +199,8 @@ Near-term priorities:
 - **Tool use that feels real** — stricter structured actions only when evals show plain native commands fail;
   actionable tool errors and evals prove shell/browser/MCP paths work.
 - **Streaming outputs** — reduce perceived latency and expose progress while keeping final replies parseable.
+- **Local span observability before SDKs** — keep OTel-shaped GenAI attributes in JSONL first (`llm.request`,
+  `tool.call`, `context.trim`, `permission.decide`) and add an exporter only after those spans drive evals.
 - **Permission checkpoints as alignment data** — sparse, risk-triggered checkpoints with decision records,
   not approval fatigue.
 

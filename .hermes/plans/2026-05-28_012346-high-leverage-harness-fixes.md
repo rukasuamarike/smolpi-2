@@ -206,8 +206,10 @@ Every new harness component must declare the model limitation it assumes. If a s
    - `context.trim`
    - `delegate.child`
 3. Keep message logging optional via `LOG_MESSAGES=0`.
-4. Add `/logs spans` summary if cheap.
+4. Add `/logs` span count summary without changing the existing token-efficiency view.
 5. Verify one sample task produces spans that identify every step.
+
+**Status:** Implemented in commit TBD with local JSONL span records (`type:"span"`) alongside LLM records (`type:"llm"`). Covered spans: `prompt.assemble`, per-extension `extension.before_agent_start`, `context.trim`, `llm.request`, `action.parse`, `permission.decide` (currently auto-allow metadata only), and `tool.call`. `llm.request` metadata uses OTel GenAI semantic names (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`) without pulling an SDK/exporter yet.
 
 **Expected result:** Observability reaches L1/L2 boundary.
 
@@ -320,9 +322,10 @@ Every new harness component must declare the model limitation it assumes. If a s
 1. Task 1: brain readiness / ease of use.
 2. Task 2: native workspace substrate — bash/git/progress file/resource checks.
 3. Task 3: streaming outputs as a thin UX improvement.
-4. Task 6: span logging foundation, including resource and tool timing spans.
+4. Task 6: span logging foundation, including resource and tool timing spans. ✅ first slice implemented.
 5. Task 9: tiny eval suite.
 6. Task 4/5: action protocol + permission checkpoint v0 only where evals show failures or risk.
+7. Smolfile mount consolidation: current `[dev].volumes` still uses five mounts (`agent`, `scripts`, `.pi`, `extensions`, `node_modules`). Investigate/fix the 5-mount IRQ limit by consolidating read-only bind mounts or moving guest dependencies into the snapshot before adding more volumes.
 
 Do **not** start LoRA/SFT tonight. The logs are only useful for training once the harness produces reliable trajectories and labeled feedback.
 

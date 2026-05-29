@@ -17,7 +17,8 @@ export interface Usage {
   prompt_tokens_details?: { cached_tokens?: number };
 }
 
-interface Rec {
+interface LlmRec {
+  type: "llm";
   ts: string; session: string; config: string; tag: string; turn: number; step: number; model: string;
   prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens: number;
   system_chars: number; injected_chars: number; latency_ms: number;
@@ -26,10 +27,27 @@ interface Rec {
   reply?: string;
 }
 
+interface SpanRec {
+  type: "span";
+  ts: string;
+  session: string;
+  config: string;
+  turn: number;
+  step: number;
+  span: string;
+  status: "ok" | "error" | "skipped";
+  latency_ms: number;
+  error_class?: string;
+  metadata: Record<string, unknown>;
+}
+
+type LogRec = LlmRec | SpanRec;
+
 export class SessionLogger {
   readonly session = new Date().toISOString().replace(/[:.]/g, "-");
   private file = join(LOG_DIR, `${this.session}.jsonl`);
-  private recs: Rec[] = [];
+  private recs: LlmRec[] = [];
+  private spans: SpanRec[] = [];
   private withMessages = process.env.LOG_MESSAGES !== "0"; // default ON → post-training data
 
   constructor(private extensions: string[]) {}
@@ -41,7 +59,8 @@ export class SessionLogger {
     streaming?: boolean; ttftMs?: number; reasoningChars?: number;
     messages: { role: string; content: string }[]; reply: string; tag?: string;
   }): Promise<void> {
-    const rec: Rec = {
+    const rec: LlmRec = {
+      type: "llm",
       ts: new Date().toISOString(), session: this.session, config: this.config,
       tag: p.tag ?? "main",
       turn: p.turn, step: p.step, model: p.model,
@@ -58,6 +77,36 @@ export class SessionLogger {
     if (typeof p.reasoningChars === "number") rec.reasoning_chars = p.reasoningChars;
     if (this.withMessages) { rec.messages = p.messages; rec.reply = p.reply; }
     this.recs.push(rec);
+    await this.append(rec);
+  }
+
+  async logSpan(p: {
+    turn: number;
+    step: number;
+    span: string;
+    status?: "ok" | "error" | "skipped";
+    latencyMs?: number;
+    errorClass?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const rec: SpanRec = {
+      type: "span",
+      ts: new Date().toISOString(),
+      session: this.session,
+      config: this.config,
+      turn: p.turn,
+      step: p.step,
+      span: p.span,
+      status: p.status ?? "ok",
+      latency_ms: Math.max(0, Math.round(p.latencyMs ?? 0)),
+      metadata: p.metadata ?? {},
+    };
+    if (p.errorClass) rec.error_class = p.errorClass;
+    this.spans.push(rec);
+    await this.append(rec);
+  }
+
+  private async append(rec: LogRec): Promise<void> {
     try {
       await mkdir(LOG_DIR, { recursive: true });
       await appendFile(this.file, JSON.stringify(rec) + "\n");
@@ -83,6 +132,7 @@ export class SessionLogger {
       `injected memory:   ~${inj} chars in system prompt (~${Math.round(inj / 4)} tokens)`,
       `avg latency:       ${Math.round(lat / n)} ms/call`,
       `streaming calls:   ${streaming}/${n}${ttfts.length ? `  (avg TTFT ${Math.round(ttfts.reduce((a, v) => a + v, 0) / ttfts.length)} ms)` : ""}`,
+      `span events:       ${this.spans.length}`,
       `log file:          ${this.file}`,
     ].join("\n");
   }
@@ -100,11 +150,12 @@ export class SessionLogger {
       try { lines = (await readFile(join(LOG_DIR, f), "utf8")).trim().split("\n").filter(Boolean); }
       catch { continue; }
       for (const line of lines) {
-        let r: Rec;
-        try { r = JSON.parse(line); } catch { continue; }
-        const g = byConfig.get(r.config) ?? { calls: 0, prompt: 0, completion: 0, sessions: new Set<string>() };
-        g.calls++; g.prompt += r.prompt_tokens; g.completion += r.completion_tokens; g.sessions.add(r.session);
-        byConfig.set(r.config, g);
+        let r: LogRec | (Partial<LlmRec> & { type?: undefined });
+        try { r = JSON.parse(line) as LogRec; } catch { continue; }
+        if (r.type === "span") continue;
+        const g = byConfig.get(r.config ?? "none") ?? { calls: 0, prompt: 0, completion: 0, sessions: new Set<string>() };
+        g.calls++; g.prompt += r.prompt_tokens ?? 0; g.completion += r.completion_tokens ?? 0; g.sessions.add(r.session ?? "unknown");
+        byConfig.set(r.config ?? "none", g);
       }
     }
     if (!byConfig.size) return "no logs yet";
