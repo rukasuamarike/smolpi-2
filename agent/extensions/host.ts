@@ -136,7 +136,10 @@ export class ExtensionHost {
     try {
       entry = await this.resolveEntry(dir);
     } catch (e) {
-      console.error(`[ext] ${name}: cannot resolve entrypoint (${(e as Error).message})`);
+      const msg = (e as Error).message;
+      const hint = msg.includes("ENOENT") ? " (volume not mounted?)" : "";
+      console.error(`[ext] ${name}: cannot resolve entrypoint (${msg})${hint}`);
+      this.failed.push(name);
       return;
     }
 
