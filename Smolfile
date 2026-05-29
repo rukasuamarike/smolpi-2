@@ -23,7 +23,8 @@ env = [
 volumes = [
     "./agent:/app/agent",
     "./scripts:/app/scripts:ro",
-    "./.pi:/app/.pi:ro",
+    # Writable so the agent can maintain .pi/progress.md as native text state.
+    "./.pi:/app/.pi",
     # Extensions + their compat shims (run `make setup` on the host first).
     "./extensions:/app/extensions:ro",
     "./node_modules:/app/node_modules:ro",

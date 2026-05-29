@@ -146,6 +146,7 @@ say "6/6  Preflight"
 run bash scripts/doctor.sh || true
 
 say "Setup complete. To run:"
+printf '    %smake progress-init%s           # optional: create local .pi/progress.md task-state substrate\n' "$B" "$Z"
 printf '    %s./scripts/run-brain.sh%s        # start the brain (GPU: GPU_LAYERS=99)\n' "$B" "$Z"
 printf '    %smake machine-up%s               # build + provision the dev VM (installs browser39)\n' "$B" "$Z"
 printf '    %smake machine-run%s              # drop into the agent\n' "$B" "$Z"

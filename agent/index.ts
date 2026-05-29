@@ -13,6 +13,7 @@ const LLM_URL = LLM_BASE.replace(/\/+$/, "") + "/v1/chat/completions";
 const MODEL = process.env.LLM_MODEL ?? "gemma-4";
 const BROWSER_BIN = process.env.BROWSER_BIN ?? "browser39"; // Rust single binary, no Chromium
 const APPEND_PATH = process.env.APPEND_SYSTEM_PATH ?? "/app/.pi/APPEND_SYSTEM.md";
+const PROGRESS_PATH = process.env.PROGRESS_PATH ?? `${process.cwd()}/.pi/progress.md`;
 
 // Loop controls (env-overridable).
 const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 12); // stop predicate (rubric #2)
@@ -108,6 +109,16 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   lines.push(`Current Time: ${new Date().toISOString()}`);
   lines.push(`PWD: ${process.cwd()}`);
   lines.push(`OS: ${process.platform} ${process.arch}`);
+
+  const progressFile = Bun.file(PROGRESS_PATH);
+  if (await progressFile.exists()) {
+    const progress = (await progressFile.text()).trim();
+    if (progress) {
+      lines.push("");
+      lines.push("## Workspace progress (.pi/progress.md)");
+      lines.push(progress.length > 4_000 ? progress.slice(0, 4_000) + "\n…[truncated]" : progress);
+    }
+  }
 
   // Project-specific override (e.g. the Umi soul).
   const appendFile = Bun.file(APPEND_PATH);
@@ -460,6 +471,10 @@ async function runOneShot(task: string) {
     return;
   }
   const system = await host.beforeAgentStart(task, baseSystem);
+  if (process.env.DUMP_SYSTEM_PROMPT === "1") {
+    console.log(system);
+    return;
+  }
   const messages: Message[] = [{ role: "system", content: system }];
   const active = await activeCapabilities();
   console.log(`Model: ${MODEL}  | capabilities: ${active.map((c) => c.name).join(", ")}`);

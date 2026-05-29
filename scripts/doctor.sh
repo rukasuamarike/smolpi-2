@@ -122,7 +122,13 @@ fi
 
 echo "── guest VM ──"
 if smolvm machine ls 2>/dev/null | grep -q 'pi-agent-dev'; then ok "VM 'pi-agent-dev' exists"; else warn "no VM yet" "make machine-up && make machine-init && make machine-snapshot"; fi
-grep -q '\.pi:/app/\.pi' Smolfile 2>/dev/null && ok "Smolfile mounts ./.pi (soul + extension config reach the guest)" || warn ".pi not mounted in Smolfile" "add \"./.pi:/app/.pi:ro\" to [dev].volumes so APPEND_SYSTEM.md / extensions.json load in the guest"
+if grep -q '"\./\.pi:/app/\.pi:ro"' Smolfile 2>/dev/null; then
+  warn "Smolfile mounts ./.pi read-only" "use \"./.pi:/app/.pi\" so the agent can update .pi/progress.md inside the guest"
+elif grep -q '"\./\.pi:/app/\.pi"' Smolfile 2>/dev/null; then
+  ok "Smolfile mounts ./.pi writable (soul, progress, extension config reach the guest)"
+else
+  warn ".pi not mounted in Smolfile" "add \"./.pi:/app/.pi\" to [dev].volumes so APPEND_SYSTEM.md, progress.md, extensions.json load in the guest"
+fi
 
 echo "── extensions (optional) ──"
 if [ -f .pi/extensions.json ] && grep -q '"enabled": true' .pi/extensions.json 2>/dev/null; then

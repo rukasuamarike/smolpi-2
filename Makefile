@@ -14,7 +14,7 @@ VM_NAME     := pi-agent-dev
 # Forward host-side config into recipe subshells (run-brain.sh etc. inherit these).
 export LLM_HOST LLM_PORT LLM_URL LLM_MODEL BRAIN_DIR LLAMA_SERVER MODELS_DIR GPU_LAYERS CTX_SIZE
 
-.PHONY: doctor setup setup-yes setup-extensions pack \
+.PHONY: doctor setup setup-yes setup-extensions progress-init pack \
         machine-up machine-init machine-snapshot machine-down \
         test test-brain test-smol-net machine-exec machine-run clean
 
@@ -30,6 +30,15 @@ setup-yes:       ## Non-interactive onboarding (assume yes to every prompt)
 
 setup-extensions: ## (re)wire the extension compat shims into node_modules
 	bun install
+
+progress-init:   ## Create local .pi/progress.md from the tracked template if absent
+	@mkdir -p .pi
+	@if [ -f .pi/progress.md ]; then \
+		echo ".pi/progress.md already exists; leaving it alone"; \
+	else \
+		cp .pi/progress.md.example .pi/progress.md; \
+		echo "created .pi/progress.md from .pi/progress.md.example"; \
+	fi
 
 # ── Smolfile dev machine — the build path (no Docker) ────────
 # `make machine-up` builds the VM from the Smolfile and, on a FRESH create,
