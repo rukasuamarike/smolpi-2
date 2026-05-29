@@ -46,7 +46,17 @@ interface SpanRec {
   metadata: Record<string, unknown>;
 }
 
-type LogRec = LlmRec | SpanRec;
+interface SessionStartRec {
+  type: "session_start";
+  trace_id: string;
+  ts: string;
+  session: string;
+  config: string;
+  system_prompt: string;
+  tool_specs: { name: string; args: string; description: string }[];
+}
+
+type LogRec = LlmRec | SpanRec | SessionStartRec;
 
 export class SessionLogger {
   readonly session = new Date().toISOString().replace(/[:.]/g, "-");
@@ -129,6 +139,22 @@ export class SessionLogger {
     if (p.parentSpanId) rec.parent_span_id = p.parentSpanId;
     if (p.errorClass) rec.error_class = p.errorClass;
     this.spans.push(rec);
+    await this.append(rec);
+  }
+
+  // Write a session_start record as the first line of the JSONL file, embedding
+  // the resolved system prompt and tool definitions. Replay evals use these to
+  // validate against the schema that was actually active, not the current one.
+  async logSessionStart(systemPrompt: string, toolSpecs: { name: string; args: string; description: string }[]): Promise<void> {
+    const rec: SessionStartRec = {
+      type: "session_start",
+      trace_id: this.traceId,
+      ts: new Date().toISOString(),
+      session: this.session,
+      config: this.config,
+      system_prompt: systemPrompt,
+      tool_specs: toolSpecs,
+    };
     await this.append(rec);
   }
 

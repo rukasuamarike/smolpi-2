@@ -129,6 +129,13 @@ if not positive or not all(s.get("latency_ms", 0) > 0 for s in positive):
 perm_spans = [s for s in spans if s.get("span") == "permission.decide"]
 if not perm_spans or not all(s["metadata"].get("latency_source") == "measured" for s in perm_spans):
     raise SystemExit(f"permission.decide should be measured, not hardcoded: {perm_spans}")
+if not any(
+    s["metadata"].get("intent") == "filesystem_read"
+    and s["metadata"].get("risk_class") == "low"
+    and s["metadata"].get("policy_reason")
+    for s in perm_spans
+):
+    raise SystemExit(f"permission.decide should carry intent/risk/reason telemetry: {perm_spans}")
 tool_env = [s for s in spans if s.get("span") == "tool.call" and s["metadata"].get("trace_context_env")]
 if not tool_env:
     raise SystemExit(f"tool.call should propagate trace context into spawned tools: {spans}")

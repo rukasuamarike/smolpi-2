@@ -1,6 +1,11 @@
 {
   "name": "pi-agent-smol",
   "private": true,
+  "scripts": {
+    "test:unit": "bun test ./tests/unit/*.test.ts",
+    "test:trace": "bun test ./tests/unit/trace_replay.test.ts",
+    "test:smoke": "bash tests/test_llm_streaming.sh && bash tests/test_span_logging.sh && bash tests/test_doctor_external_brain.sh && bash tests/test_native_substrate_bootstrap.sh && bash tests/test_native_workspace_ease.sh"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@sinclair/typebox": "^0.34.49",

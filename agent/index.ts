@@ -5,6 +5,10 @@ import {
   type Capability,
 } from "./capabilities";
 import { ExtensionHost } from "./extensions/host";
+import { parseAction, type Action } from "./action";
+import { insertCompactionNotice, messageChars, trimContext, type Message } from "./context";
+import { classifyActionRisk } from "./policy";
+import { parseSseBuffer } from "./sse";
 import type { McpBridge } from "./mcp/bridge"; // type-only: erased at compile time, no SDK at runtime
 import { SessionLogger, type Usage } from "./logger";
 
@@ -24,11 +28,27 @@ const OUT_CAP = Number(process.env.TOOL_OUTPUT_CAP ?? 4_000);
 const EXPERIMENTAL = process.env.AGENT_EXPERIMENTAL === "1"; // gates native delegate (deny-by-default)
 const DELEGATE_MAX_STEPS = Number(process.env.DELEGATE_MAX_STEPS ?? 5);
 const LLM_STREAM = process.env.LLM_STREAM !== "0";
+const LLM_CONCURRENCY = Number(process.env.LLM_CONCURRENCY ?? 1);
 
-interface Message {
-  role: "system" | "user" | "assistant";
-  content: string;
+// Thin semaphore so delegate Promise.all can't fire more concurrent LLM calls
+// than the backend has slots. Default LLM_CONCURRENCY=1 serialises delegates;
+// raise it to match llama.cpp --parallel N once you've configured the backend.
+class Semaphore {
+  private queue: (() => void)[] = [];
+  private running = 0;
+  constructor(private max: number) {}
+  async acquire(): Promise<void> {
+    if (this.running < this.max) { this.running++; return; }
+    await new Promise<void>((res) => this.queue.push(res));
+    this.running++;
+  }
+  release(): void {
+    this.running--;
+    const next = this.queue.shift();
+    if (next) next();
+  }
 }
+const llmSemaphore = new Semaphore(LLM_CONCURRENCY);
 
 async function generatePrompt(host: ExtensionHost): Promise<string> {
   const active = await activeCapabilities();
@@ -163,24 +183,6 @@ async function llm(messages: Message[]): Promise<LlmResult> {
   };
 }
 
-function parseSseBuffer(buffer: string): { events: string[]; rest: string } {
-  const events: string[] = [];
-  let start = 0;
-  while (true) {
-    const idx = buffer.indexOf("\n\n", start);
-    if (idx === -1) break;
-    const raw = buffer.slice(start, idx);
-    start = idx + 2;
-    const data = raw
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-      .join("\n");
-    if (data) events.push(data);
-  }
-  return { events, rest: buffer.slice(start) };
-}
-
 async function llmStream(messages: Message[], onDelta?: (delta: string) => void): Promise<LlmResult> {
   const t0 = performance.now();
   const res = await fetch(LLM_URL, {
@@ -300,77 +302,6 @@ async function shell(cmd: string, traceEnv: Record<string, string> = {}): Promis
   return out.trim() || "(no output)";
 }
 
-type Action =
-  | { kind: "sh" | "browse"; arg: string }
-  | { kind: "tool"; name: string; arg: string }
-  | { kind: "done" }
-  | null;
-
-// Robust parse: tag form (multiline, tolerant of inner `]`) preferred; legacy
-// [sh:]/[browse:] kept as a fallback. Earliest action wins (one per step), so a
-// reply with both a shell and a browse no longer silently drops the first.
-function parseAction(reply: string): Action {
-  // `<done/>` is TERMINAL. The model signals completion with it, and its final
-  // answer often contains example commands in <sh> tags for documentation — we
-  // must NOT execute those. Done wins over any trailing action.
-  if (/<done\s*\/?>|\[done\]/i.test(reply)) return { kind: "done" };
-
-  const cands: { idx: number; kind: "sh" | "browse" | "tool"; arg: string; name?: string }[] = [];
-  const first = (re: RegExp, kind: "sh" | "browse") => {
-    const m = re.exec(reply);
-    if (m && m[1].trim()) cands.push({ idx: m.index, kind, arg: m[1].trim() });
-  };
-
-  // Accept both <tool name="X">{json}</tool> and self-closing <tool name="X"/>.
-  const mTool = /<tool\s+name="([^"]+)"\s*(?:\/>|>([\s\S]*?)<\/tool>)/i.exec(reply);
-  if (mTool) cands.push({ idx: mTool.index, kind: "tool", name: mTool[1], arg: (mTool[2] ?? "").trim() });
-  first(/<sh>([\s\S]*?)<\/sh>/i, "sh");
-  first(/<browse>([\s\S]*?)<\/browse>/i, "browse");
-  if (!cands.length) {
-    // legacy fallback
-    first(/\[browse:\s*([^\]\n]+)\]/i, "browse");
-    first(/\[sh:([\s\S]+)\]/i, "sh"); // greedy to last ] — tolerates inner ]
-  }
-
-  if (cands.length) {
-    cands.sort((a, b) => a.idx - b.idx);
-    const e = cands[0]; // earliest action wins (one per step)
-    return e.kind === "tool"
-      ? { kind: "tool", name: e.name!, arg: e.arg }
-      : { kind: e.kind, arg: e.arg };
-  }
-  return null; // no action and no done → treat the reply as a final answer
-}
-
-// Sliding-window trim so a long multi-step run doesn't overflow the context
-// window. Always keeps the system prompt and the original task (rubric #3:
-// re-inject load-bearing instructions); drops oldest observations first.
-function trimContext(messages: Message[]): Message[] {
-  const total = messages.reduce((n, m) => n + m.content.length, 0);
-  if (total <= CTX_CHAR_BUDGET) return messages;
-
-  const system = messages[0];
-  const firstUserIdx = messages.findIndex((m, i) => i > 0 && m.role === "user");
-  const firstUser = firstUserIdx >= 0 ? messages[firstUserIdx] : null;
-
-  let used = system.content.length + (firstUser?.content.length ?? 0);
-  const tail: Message[] = [];
-  for (let i = messages.length - 1; i >= 1; i--) {
-    if (i === firstUserIdx) continue;
-    const m = messages[i];
-    if (used + m.content.length > CTX_CHAR_BUDGET) break;
-    used += m.content.length;
-    tail.unshift(m);
-  }
-  const head: Message[] = [system];
-  if (firstUser) head.push(firstUser);
-  return head.concat(tail);
-}
-
-function messageChars(messages: Message[]): number {
-  return messages.reduce((n, m) => n + m.content.length, 0);
-}
-
 function errorClass(e: unknown): string {
   return (e as Error)?.name || "Error";
 }
@@ -429,7 +360,7 @@ async function runChild(subtask: string, baseSystem: string, host: ExtensionHost
   ];
   let final = "(no answer)";
   for (let step = 1; step <= DELEGATE_MAX_STEPS; step++) {
-    const sendable = trimContext(messages);
+    const { messages: sendable } = trimContext(messages, CTX_CHAR_BUDGET);
     let r: LlmResult;
     try { r = await llm(sendable); }
     catch (e) { return `[delegate ${idx} LLM error: ${(e as Error).message}]`; }
@@ -470,10 +401,15 @@ async function runDelegate(args: Record<string, unknown>, baseSystem: string, ho
   if (!tasks.length) return 'ERROR: delegate needs {"task":"..."} or {"tasks":["...","..."]}.';
   const t0 = performance.now();
   const results = await Promise.all(
-    tasks.map((t, i) => runChild(t, baseSystem, host, logger, parentTurn, i + 1)),
+    tasks.map((t, i) => async () => {
+      await llmSemaphore.acquire();
+      try { return await runChild(t, baseSystem, host, logger, parentTurn, i + 1); }
+      finally { llmSemaphore.release(); }
+    }).map((f) => f()),
   );
   const ms = Math.round(performance.now() - t0);
-  const head = `(ran ${tasks.length} delegate${tasks.length > 1 ? "s in parallel" : ""} in ${ms}ms)`;
+  const serial = LLM_CONCURRENCY === 1 && tasks.length > 1;
+  const head = `(ran ${tasks.length} delegate${tasks.length > 1 ? (serial ? "s sequentially" : "s in parallel") : ""} in ${ms}ms${serial ? "; set LLM_CONCURRENCY>1 only if backend has slots" : ""})`;
   return [head, ...tasks.map((t, i) => `### Delegate ${i + 1}: ${t}\n${results[i]}`)].join("\n\n");
 }
 
@@ -485,7 +421,8 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
     const stepT0 = performance.now();
     const trimT0 = performance.now();
     const beforeChars = messageChars(messages);
-    const sendable = trimContext(messages);
+    const { messages: trimmed, droppedCount } = trimContext(messages, CTX_CHAR_BUDGET);
+    const sendable = droppedCount > 0 ? insertCompactionNotice(trimmed, droppedCount) : trimmed;
     await logger.logSpan({
       turn,
       step,
@@ -494,11 +431,12 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       latencyMs: performance.now() - trimT0,
       metadata: {
         before_chars: beforeChars,
-        after_chars: messageChars(sendable),
+        after_chars: messageChars(trimmed),
         before_messages: messages.length,
-        after_messages: sendable.length,
+        after_messages: trimmed.length,
         budget_chars: CTX_CHAR_BUDGET,
-        trimmed: sendable.length !== messages.length || messageChars(sendable) !== beforeChars,
+        trimmed: droppedCount > 0,
+        dropped_count: droppedCount,
       },
     });
     let reply: string;
@@ -574,6 +512,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
     }
 
     const permT0 = performance.now();
+    const actionRisk = classifyActionRisk(action);
     await logger.logSpan({
       turn,
       step,
@@ -582,8 +521,10 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       latencyMs: performance.now() - permT0,
       metadata: {
         action_kind: action.kind,
-        policy: "auto_allow",
-        risk_class: action.kind === "sh" || action.kind === "browse" ? "read_only_or_workspace" : "tool",
+        policy: actionRisk.policy,
+        intent: actionRisk.intent,
+        risk_class: actionRisk.riskClass,
+        policy_reason: actionRisk.policyReason,
         latency_source: "measured",
       },
     });
@@ -696,6 +637,7 @@ async function agentLoop() {
   const baseSystem = await generatePrompt(host);
   const messages: Message[] = [{ role: "system", content: baseSystem }];
   const logger = new SessionLogger(host.names());
+  await logger.logSessionStart(baseSystem, host.toolSpecs());
   let turn = 0;
 
   const reader = (await import("readline")).createInterface({
@@ -746,6 +688,7 @@ async function runOneShot(task: string) {
     return;
   }
   const system = await assembleSystemForTask(task, baseSystem, host, logger, 1, 0);
+  await logger.logSessionStart(system, host.toolSpecs());
   if (process.env.DUMP_SYSTEM_PROMPT === "1") {
     console.log(system);
     return;
