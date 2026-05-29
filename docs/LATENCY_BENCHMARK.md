@@ -2,6 +2,31 @@
 
 Captured from end-to-end testing after native substrate wiring.
 
+## Context size comparison
+
+| CTX_SIZE | Throughput (tok/s) | TTFT p50 | TTFT p95 | KV VRAM | CTX_CHAR_BUDGET headroom |
+|----------|-------------------|----------|----------|---------|--------------------------|
+| 4096     | 153–160           | 61ms     | 121ms    | ~400MB  | 2% (dangerously tight)   |
+| **8192** | **140–155**       | **65ms** | **130ms**| **~800MB** | **49% (current default)** |
+| 16384    | 120–140           | 72ms     | 145ms    | ~1.6GB  | 74% (ample headroom)     |
+
+**CTX_SIZE=8192 is the new default** in `scripts/run-brain.sh`. Set `MODEL_CTX_TOKENS=8192`
+in `.env` to match so the agent's runtime budget warning fires correctly.
+
+At 4096 tokens, `CTX_CHAR_BUDGET=16,000` consumed 98% of the window leaving no room for
+completion tokens. At 8192, it consumes 49% — model quality improves measurably.
+
+## Concurrent slot throughput
+
+| llama.cpp --parallel | LLM_CONCURRENCY | 4× delegate result |
+|----------------------|-----------------|---------------------|
+| 1 (default)          | 1               | Serialised, all complete |
+| 1                    | 4               | 2–3/4 return empty (slot starvation) |
+| 4                    | 4               | All complete, ~3.5× wall-clock |
+
+Never set `LLM_CONCURRENCY > --parallel`. The semaphore in `agent/delegate.ts`
+enforces sequential execution at `LLM_CONCURRENCY=1` (the safe default).
+
 ## Status
 
 - `make doctor`: 22 ok · 0 warnings · 0 failures

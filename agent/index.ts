@@ -9,50 +9,26 @@ import { parseAction, type Action } from "./action";
 import { insertCompactionNotice, messageChars, trimContext, type Message } from "./context";
 import { compactLargeObservations, formatObservation } from "./observation";
 import { classifyActionRisk } from "./policy";
-import { parseSseBuffer } from "./sse";
 import type { McpBridge } from "./mcp/bridge"; // type-only: erased at compile time, no SDK at runtime
-import { SessionLogger, type Usage } from "./logger";
+import { SessionLogger } from "./logger";
+import { llmWithOptionalStream, browse, shell, errorClass, MODEL, LLM_URL, type LlmResult } from "./llm";
+import { assembleSystemForTask, runDelegate, runConsolidateMemory } from "./delegate";
 
-const LLM_BASE = process.env.LLM_URL ?? "http://127.0.0.1:8080";
-const LLM_URL = LLM_BASE.replace(/\/+$/, "") + "/v1/chat/completions";
-const MODEL = process.env.LLM_MODEL ?? "gemma-4";
-const BROWSER_BIN = process.env.BROWSER_BIN ?? "browser39"; // Rust single binary, no Chromium
 const APPEND_PATH = process.env.APPEND_SYSTEM_PATH ?? "/app/.pi/APPEND_SYSTEM.md";
 // AGENT_RULES.md is injected into baseSystem (never the sliding-window history)
 // so its content is pinned across all context compaction. Put load-bearing rules here.
 const AGENT_RULES_PATH = process.env.AGENT_RULES_PATH ?? `${process.cwd()}/.pi/AGENT_RULES.md`;
 const PROGRESS_PATH = process.env.PROGRESS_PATH ?? `${process.cwd()}/.pi/progress.md`;
 
-// Loop controls (env-overridable).
-const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 12); // stop predicate (rubric #2)
-const MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 1024);
-const SHELL_TIMEOUT_MS = Number(process.env.SHELL_TIMEOUT_MS ?? 60_000); // fixes the no-timeout hang
-const CTX_CHAR_BUDGET = Number(process.env.CTX_CHAR_BUDGET ?? 16_000); // sliding-window trim (rubric #3)
-const OUT_CAP = Number(process.env.TOOL_OUTPUT_CAP ?? 4_000);
-const EXPERIMENTAL = process.env.AGENT_EXPERIMENTAL === "1"; // gates native delegate (deny-by-default)
-const DELEGATE_MAX_STEPS = Number(process.env.DELEGATE_MAX_STEPS ?? 5);
-const LLM_STREAM = process.env.LLM_STREAM !== "0";
-const LLM_CONCURRENCY = Number(process.env.LLM_CONCURRENCY ?? 1);
-
-// Thin semaphore so delegate Promise.all can't fire more concurrent LLM calls
-// than the backend has slots. Default LLM_CONCURRENCY=1 serialises delegates;
-// raise it to match llama.cpp --parallel N once you've configured the backend.
-class Semaphore {
-  private queue: (() => void)[] = [];
-  private running = 0;
-  constructor(private max: number) {}
-  async acquire(): Promise<void> {
-    if (this.running < this.max) { this.running++; return; }
-    await new Promise<void>((res) => this.queue.push(res));
-    this.running++;
-  }
-  release(): void {
-    this.running--;
-    const next = this.queue.shift();
-    if (next) next();
-  }
+const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 12);
+const CTX_CHAR_BUDGET = Number(process.env.CTX_CHAR_BUDGET ?? 16_000);
+// MODEL_CTX_TOKENS should match --ctx-size passed to llama-server (default now 8192).
+// Warn if the prompt budget leaves less than 15% headroom for completion tokens.
+const MODEL_CTX_TOKENS = Number(process.env.MODEL_CTX_TOKENS ?? 8192);
+if (CTX_CHAR_BUDGET / (MODEL_CTX_TOKENS * 4) > 0.85) {
+  console.warn(`⚠ CTX_CHAR_BUDGET (${CTX_CHAR_BUDGET}) is >85% of MODEL_CTX_TOKENS*4 (${MODEL_CTX_TOKENS * 4}) — raise MODEL_CTX_TOKENS or lower CTX_CHAR_BUDGET`);
 }
-const llmSemaphore = new Semaphore(LLM_CONCURRENCY);
+const EXPERIMENTAL = process.env.AGENT_EXPERIMENTAL === "1";
 
 async function generatePrompt(host: ExtensionHost): Promise<string> {
   const active = await activeCapabilities();
@@ -177,296 +153,9 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   return lines.join("\n");
 }
 
-interface LlmResult {
-  content: string;
-  usage: Usage;
-  latencyMs: number;
-  streaming?: boolean;
-  ttftMs?: number;
-  reasoningChars?: number;
-}
-
-async function llm(messages: Message[]): Promise<LlmResult> {
-  const t0 = performance.now();
-  const res = await fetch(LLM_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages, max_tokens: MAX_TOKENS }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`LLM error ${res.status}: ${text}`);
-  }
-  const data = await res.json();
-  return {
-    content: data.choices?.[0]?.message?.content ?? "",
-    usage: data.usage ?? {},
-    latencyMs: performance.now() - t0,
-  };
-}
-
-async function llmStream(messages: Message[], onDelta?: (delta: string) => void): Promise<LlmResult> {
-  const t0 = performance.now();
-  const res = await fetch(LLM_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, messages, max_tokens: MAX_TOKENS, stream: true }),
-  });
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`stream rejected ${res.status}: ${text}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let content = "";
-  let reasoningContent = "";
-  let usage: Usage = {};
-  let ttftMs: number | undefined;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-    const parsed = parseSseBuffer(buf);
-    buf = parsed.rest;
-    for (const event of parsed.events) {
-      if (event.trim() === "[DONE]") continue;
-      let data: any;
-      try { data = JSON.parse(event); } catch { continue; }
-      if (data.usage) usage = data.usage;
-      if (!usage.prompt_tokens && data.timings) {
-        const prompt = Number(data.timings.prompt_n ?? 0);
-        const completion = Number(data.timings.predicted_n ?? 0);
-        usage = { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion };
-      }
-      const reasoning = data.choices?.[0]?.delta?.reasoning_content ?? "";
-      if (reasoning) {
-        if (ttftMs === undefined) ttftMs = performance.now() - t0;
-        // Thinking-model reasoning is tracked for observability, but not appended
-        // to visible/action content. Executing hidden-chain tool calls would be a
-        // footgun; only explicit visible actions are parsed.
-        reasoningContent += reasoning;
-      }
-      const delta = data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content ?? "";
-      if (delta) {
-        if (ttftMs === undefined) ttftMs = performance.now() - t0;
-        content += delta;
-        onDelta?.(delta);
-      }
-    }
-  }
-
-  buf += decoder.decode();
-  const parsed = parseSseBuffer(buf);
-  for (const event of parsed.events) {
-    if (event.trim() === "[DONE]") continue;
-    try {
-      const data = JSON.parse(event);
-      if (data.usage) usage = data.usage;
-      if (!usage.prompt_tokens && data.timings) {
-        const prompt = Number(data.timings.prompt_n ?? 0);
-        const completion = Number(data.timings.predicted_n ?? 0);
-        usage = { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion };
-      }
-    } catch {}
-  }
-  return { content, usage, latencyMs: performance.now() - t0, streaming: true, ttftMs, reasoningChars: reasoningContent.length };
-}
-
-async function llmWithOptionalStream(messages: Message[], onDelta?: (delta: string) => void): Promise<LlmResult> {
-  if (!LLM_STREAM) return { ...(await llm(messages)), streaming: false };
-  try {
-    return await llmStream(messages, onDelta);
-  } catch (e) {
-    console.error(`⚠ streaming failed; falling back to non-streaming: ${(e as Error).message}`);
-    return { ...(await llm(messages)), streaming: false };
-  }
-}
-
-async function browse(url: string): Promise<string> {
-  // browser39 `fetch` runs JS (V8), follows the page, and emits token-efficient
-  // Markdown directly — no Chromium, no separate readability pass.
-  const proc = Bun.spawn([BROWSER_BIN, "fetch", url], { stdout: "pipe", stderr: "pipe" });
-  const stdout = await new Response(proc.stdout).text();
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`browser39 fetch failed (${exitCode}): ${stderr.trim()}`);
-  }
-  let out = stdout.trim();
-  if (out.length > OUT_CAP) out = out.slice(0, OUT_CAP) + "\n…[truncated]";
-  return out || "(no output)";
-}
-
-async function shell(cmd: string, traceEnv: Record<string, string> = {}): Promise<string> {
-  const proc = Bun.spawn(["bash", "-c", cmd], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...traceEnv } });
-  // Hard timeout: a command blocking on stdin must not hang the agent forever.
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    try { proc.kill(); } catch {}
-  }, SHELL_TIMEOUT_MS);
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  clearTimeout(timer);
-
-  let out = stdout.trim();
-  if (stderr.trim()) out += `\n[stderr]\n${stderr.trim()}`;
-  if (timedOut) out = `[timed out after ${SHELL_TIMEOUT_MS}ms]\n${out}`;
-  else if (code !== 0) out = `[exit ${code}]\n${out}`;
-  if (out.length > OUT_CAP) out = out.slice(0, OUT_CAP) + "\n…[truncated]";
-  return out.trim() || "(no output)";
-}
-
-function errorClass(e: unknown): string {
-  return (e as Error)?.name || "Error";
-}
-
-async function assembleSystemForTask(
-  task: string,
-  baseSystem: string,
-  host: ExtensionHost,
-  logger: SessionLogger,
-  turn: number,
-  step = 0,
-): Promise<string> {
-  const t0 = performance.now();
-  const system = await host.beforeAgentStart(task, baseSystem, async (s) => {
-    await logger.logSpan({
-      turn,
-      step,
-      span: "extension.before_agent_start",
-      status: s.status,
-      latencyMs: s.latencyMs,
-      errorClass: s.errorClass,
-      metadata: {
-        extension: s.extension,
-        input_chars: s.inputChars,
-        output_chars: s.outputChars,
-      },
-    });
-  });
-  await logger.logSpan({
-    turn,
-    step,
-    span: "prompt.assemble",
-    latencyMs: performance.now() - t0,
-    metadata: {
-      base_system_chars: baseSystem.length,
-      system_chars: system.length,
-      injected_chars: Math.max(0, system.length - baseSystem.length),
-      extension_count: host.names().length,
-    },
-  });
-  return system;
-}
-
 // One user task → autonomous multi-step loop. Returns to the REPL on completion,
 // LLM failure, or step-budget exhaustion. Tool errors are fed back as
 // observations (the model can recover) and never crash the process.
-// ── Native delegate (experimental). Run a sub-task in a FRESH, isolated context
-// (subagent isolation, rubric #9) and return only its distilled final answer.
-// Nested delegation is blocked; children are step-budgeted; calls are logged
-// with a `delegate:N` tag so their token cost is tracked separately. ──
-async function runChild(subtask: string, baseSystem: string, host: ExtensionHost, logger: SessionLogger, parentTurn: number, idx: number): Promise<string> {
-  const childSystem = await assembleSystemForTask(subtask, baseSystem, host, logger, parentTurn, 0);
-  const messages: Message[] = [
-    { role: "system", content: childSystem },
-    { role: "user", content: subtask },
-  ];
-  let final = "(no answer)";
-  for (let step = 1; step <= DELEGATE_MAX_STEPS; step++) {
-    const { messages: sendable } = trimContext(messages, CTX_CHAR_BUDGET);
-    let r: LlmResult;
-    try { r = await llm(sendable); }
-    catch (e) { return `[delegate ${idx} LLM error: ${(e as Error).message}]`; }
-    await logger.log({
-      turn: parentTurn, step, model: MODEL, usage: r.usage, latencyMs: r.latencyMs,
-      systemChars: messages[0].content.length, baseChars: baseSystem.length,
-      messages: sendable, reply: r.content, tag: `delegate:${idx}`,
-    });
-    messages.push({ role: "assistant", content: r.content });
-    final = r.content;
-    const action = parseAction(r.content);
-    if (!action || action.kind === "done") break;
-    let obs: string;
-    try {
-      if (action.kind === "tool" && action.name === "delegate") {
-        obs = "ERROR: nested delegation is not allowed.";
-      } else if (action.kind === "tool") {
-        let a: Record<string, unknown> = {};
-        try { a = action.arg ? JSON.parse(action.arg) : {}; } catch { a = {}; }
-        obs = await host.callTool(action.name, a);
-      } else if (action.kind === "browse") {
-        obs = await browse(action.arg);
-      } else {
-        obs = await shell(action.arg);
-      }
-    } catch (e) { obs = `ERROR: ${(e as Error).message}`; }
-    messages.push({ role: "user", content: `Observation:\n${obs}` });
-    await host.runTurnEnd();
-  }
-  return final.replace(/<done\s*\/?>/gi, "").trim() || "(no answer)";
-}
-
-async function runDelegate(args: Record<string, unknown>, baseSystem: string, host: ExtensionHost, logger: SessionLogger, parentTurn: number): Promise<string> {
-  const raw = args as { task?: unknown; tasks?: unknown };
-  const tasks: string[] = Array.isArray(raw.tasks)
-    ? raw.tasks.map(String)
-    : raw.task ? [String(raw.task)] : [];
-  if (!tasks.length) return 'ERROR: delegate needs {"task":"..."} or {"tasks":["...","..."]}.';
-  const t0 = performance.now();
-  const results = await Promise.all(
-    tasks.map((t, i) => async () => {
-      await llmSemaphore.acquire();
-      try { return await runChild(t, baseSystem, host, logger, parentTurn, i + 1); }
-      finally { llmSemaphore.release(); }
-    }).map((f) => f()),
-  );
-  const ms = Math.round(performance.now() - t0);
-  const serial = LLM_CONCURRENCY === 1 && tasks.length > 1;
-  const head = `(ran ${tasks.length} delegate${tasks.length > 1 ? (serial ? "s sequentially" : "s in parallel") : ""} in ${ms}ms${serial ? "; set LLM_CONCURRENCY>1 only if backend has slots" : ""})`;
-  return [head, ...tasks.map((t, i) => `### Delegate ${i + 1}: ${t}\n${results[i]}`)].join("\n\n");
-}
-
-// Summarize the current message history into a compact Knowledge Block and splice
-// it into the messages array in place. Allows the agent to proactively compact
-// between subtasks rather than waiting for reactive sliding-window trim.
-async function runConsolidateMemory(messages: Message[], step: number): Promise<string> {
-  const historySlice = messages.slice(2, -1); // skip sys + first_user + keep current assistant
-  if (historySlice.length < 4) {
-    return "[consolidate_memory: nothing to compact — fewer than 4 messages in history]";
-  }
-  const summaryMessages: Message[] = [
-    {
-      role: "system",
-      content: "Summarize the agent work log below into a compact Knowledge Block under 400 words. Preserve: goal, key findings, files touched, decisions made, current state, open risks, next step. Discard verbose tool outputs.",
-    },
-    {
-      role: "user",
-      content: historySlice.map((m) => `[${m.role.toUpperCase()}]\n${m.content}`).join("\n\n---\n\n"),
-    },
-  ];
-  let summary: string;
-  try {
-    const r = await llm(summaryMessages);
-    summary = r.content.trim();
-  } catch (e) {
-    return `[consolidate_memory: LLM summarization failed — ${(e as Error).message}]`;
-  }
-  messages.splice(2, historySlice.length, {
-    role: "user",
-    content: `[Knowledge Block — step ${step}, ${historySlice.length} messages compacted]\n${summary}`,
-  });
-  return `[consolidate_memory: compacted ${historySlice.length} messages → 1 Knowledge Block (${summary.length} chars)]`;
-}
-
 async function runTask(messages: Message[], logger: SessionLogger, turn: number, baseSystem: string, host: ExtensionHost): Promise<void> {
   const baseChars = baseSystem.length;
   try {
@@ -474,7 +163,6 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
     const stepSpanId = logger.newSpanId();
     const stepT0 = performance.now();
     // Proactively elide old large observations to pointers before the trim runs.
-    // Preserves the most recent observation verbatim (skipTail=1).
     if (step > 1) {
       const { messages: compacted, elided } = compactLargeObservations(messages);
       if (elided > 0) messages.splice(0, messages.length, ...compacted);
@@ -539,7 +227,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         metadata: { stop_reason: "llm_error" },
       });
       console.error(`⚠ LLM error: ${(e as Error).message}`);
-      return; // back to prompt; do not kill the REPL
+      return;
     }
     messages.push({ role: "assistant", content: reply });
     if (streamed) console.log("");
@@ -553,10 +241,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       span: "action.parse",
       parentSpanId: stepSpanId,
       latencyMs: performance.now() - parseT0,
-      metadata: {
-        action_kind: action?.kind ?? "none",
-        reply_chars: reply.length,
-      },
+      metadata: { action_kind: action?.kind ?? "none", reply_chars: reply.length },
     });
     if (!action || action.kind === "done") {
       if (action?.kind === "done") console.log("✓ done");
@@ -620,7 +305,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
     } catch (e) {
       toolStatus = "error";
       toolErr = errorClass(e);
-      obs = `ERROR: ${(e as Error).message}`; // recoverable: the model sees it next step
+      obs = `ERROR: ${(e as Error).message}`;
     }
     await logger.logSpan({
       turn,
@@ -634,14 +319,13 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       metadata: {
         "tool.kind": action.kind,
         tool_name: action.kind === "tool" ? action.name : action.kind,
-        arg_chars: action.kind === "tool" ? action.arg.length : action.arg.length,
+        arg_chars: action.arg.length,
         output_chars: obs.length,
         trace_context_env: true,
         traceparent: toolTraceEnv.TRACEPARENT,
       },
     });
-    // Checkpoint: flush observation metadata to JSONL before mutating messages.
-    // A session resumed after a crash can determine exactly which step was in flight.
+    // Checkpoint observation metadata before mutating messages (crash recovery).
     await logger.logObservation({
       turn, step,
       spanId: toolSpanId,
@@ -651,10 +335,9 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
       preview: obs.slice(0, 200),
     });
     console.log(obs.length > 600 ? obs.slice(0, 600) + " …" : obs);
-    // Wrap external content in a neutral delimiter to resist indirect prompt injection.
     const toolKind = action.kind === "tool" ? action.name : action.kind;
     messages.push({ role: "user", content: `Observation:\n${formatObservation(obs, toolKind)}` });
-    await host.runTurnEnd(); // rebuild wiki metadata so writes are recallable next step
+    await host.runTurnEnd();
     await logger.logSpan({
       turn,
       step,
@@ -668,21 +351,15 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
   }
   console.log(`(stopped: hit ${MAX_STEPS}-step budget — refine the task or raise AGENT_MAX_STEPS)`);
   } finally {
-    await host.runTurnEnd(); // e.g. llm-wiki rebuilds metadata after writes
+    await host.runTurnEnd();
   }
 }
 
-// Load enabled extensions once (deny-by-default via .pi/extensions.json).
 async function initHost(): Promise<ExtensionHost> {
   const host = new ExtensionHost();
   await host.load();
   await host.sessionStart();
 
-  // Native MCP bridge — deny-by-default: only active if .pi/mcp.json declares
-  // servers (e.g. browser39's `browser39 mcp`). Registers ONE proxy tool plus any
-  // configured direct tools. Connections are lazy, so boot stays fast.
-  // Loaded lazily so a missing/broken @modelcontextprotocol/sdk degrades
-  // gracefully (no MCP) instead of crashing the whole agent at startup.
   try {
     const { McpBridge } = await import("./mcp/bridge");
     const mcp: McpBridge = new McpBridge();
@@ -692,10 +369,8 @@ async function initHost(): Promise<ExtensionHost> {
       tools.push(...(await mcp.directTools()));
       host.registerNative("mcp-bridge", tools);
       console.error(`[mcp] ${mcp.summary()}`);
-      // `exit` handlers are synchronous and can't await, so stdio MCP children
-      // could be orphaned. Use signal handlers that await shutdown, then exit.
       const shutdown = async (code: number) => {
-        try { await mcp.shutdownAll(); } catch { /* best-effort child cleanup */ }
+        try { await mcp.shutdownAll(); } catch {}
         process.exit(code);
       };
       process.once("SIGINT", () => { void shutdown(130); });
@@ -723,10 +398,12 @@ async function agentLoop() {
     new Promise((res) => reader.question(q, res));
 
   const active = await activeCapabilities();
+  const diag = host.diagnostics();
   console.log(`Connecting to LLM at: ${LLM_URL}`);
-  console.log(`Model: ${MODEL}  | max steps/turn: ${MAX_STEPS}  | shell timeout: ${SHELL_TIMEOUT_MS}ms`);
+  console.log(`Model: ${MODEL}  |  max steps/turn: ${MAX_STEPS}  |  ctx budget: ${CTX_CHAR_BUDGET} chars`);
   console.log(`Capabilities (${active.length}): ${active.map((c) => c.name).join(", ")}`);
   console.log(`Extensions: ${host.summary()}`);
+  console.log(`Extension config: ${diag.configPath}${diag.failed.length ? `  ⚠ failed: ${diag.failed.join(", ")}` : ""}`);
   console.log("pi-agent-smol ready. Type a task, /logs for token stats, or 'exit'.");
 
   while (true) {
@@ -739,12 +416,11 @@ async function agentLoop() {
       console.log(await SessionLogger.allTimeSummary());
       continue;
     }
-    // Per-prompt memory injection (memctx Memory Gateway, hermes-memory, etc.).
     const currentTurn = turn + 1;
     messages[0] = { role: "system", content: await assembleSystemForTask(input, baseSystem, host, logger, currentTurn, 0) };
     messages.push({ role: "user", content: input });
     try {
-      await runTask(messages, logger, ++turn, baseSystem, host); // never throws
+      await runTask(messages, logger, ++turn, baseSystem, host);
     } catch (e) {
       console.error(`⚠ unexpected: ${(e as Error).message}`);
     }
@@ -752,8 +428,6 @@ async function agentLoop() {
   reader.close();
 }
 
-// One-shot/batch mode (set AGENT_TASK or pass the task as argv) — runs a single
-// task to completion and exits. Used for scripted/non-interactive testing.
 async function runOneShot(task: string) {
   const host = await initHost();
   const baseSystem = await generatePrompt(host);

@@ -7,7 +7,7 @@ _ENV="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/.env"
 
 PORT="${PORT:-${LLM_PORT:-8080}}"
 HOST="0.0.0.0"
-CTX_SIZE="${CTX_SIZE:-4096}"
+CTX_SIZE="${CTX_SIZE:-8192}"  # 8K default; set MODEL_CTX_TOKENS=8192 in .env to match
 MODELS_DIR="${MODELS_DIR:-./models}"
 
 # ── Locate llama-server ──────────────────────────────────────
