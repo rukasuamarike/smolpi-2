@@ -23,6 +23,7 @@ const CTX_CHAR_BUDGET = Number(process.env.CTX_CHAR_BUDGET ?? 16_000); // slidin
 const OUT_CAP = Number(process.env.TOOL_OUTPUT_CAP ?? 4_000);
 const EXPERIMENTAL = process.env.AGENT_EXPERIMENTAL === "1"; // gates native delegate (deny-by-default)
 const DELEGATE_MAX_STEPS = Number(process.env.DELEGATE_MAX_STEPS ?? 5);
+const LLM_STREAM = process.env.LLM_STREAM !== "0";
 
 interface Message {
   role: "system" | "user" | "assistant";
@@ -134,7 +135,7 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   return lines.join("\n");
 }
 
-interface LlmResult { content: string; usage: Usage; latencyMs: number; }
+interface LlmResult { content: string; usage: Usage; latencyMs: number; streaming?: boolean; ttftMs?: number; }
 
 async function llm(messages: Message[]): Promise<LlmResult> {
   const t0 = performance.now();
@@ -153,6 +154,84 @@ async function llm(messages: Message[]): Promise<LlmResult> {
     usage: data.usage ?? {},
     latencyMs: performance.now() - t0,
   };
+}
+
+function parseSseBuffer(buffer: string): { events: string[]; rest: string } {
+  const events: string[] = [];
+  let start = 0;
+  while (true) {
+    const idx = buffer.indexOf("\n\n", start);
+    if (idx === -1) break;
+    const raw = buffer.slice(start, idx);
+    start = idx + 2;
+    const data = raw
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    if (data) events.push(data);
+  }
+  return { events, rest: buffer.slice(start) };
+}
+
+async function llmStream(messages: Message[], onDelta?: (delta: string) => void): Promise<LlmResult> {
+  const t0 = performance.now();
+  const res = await fetch(LLM_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: MODEL, messages, max_tokens: MAX_TOKENS, stream: true }),
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`stream rejected ${res.status}: ${text}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let content = "";
+  let usage: Usage = {};
+  let ttftMs: number | undefined;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    const parsed = parseSseBuffer(buf);
+    buf = parsed.rest;
+    for (const event of parsed.events) {
+      if (event.trim() === "[DONE]") continue;
+      let data: any;
+      try { data = JSON.parse(event); } catch { continue; }
+      if (data.usage) usage = data.usage;
+      const delta = data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content ?? "";
+      if (delta) {
+        if (ttftMs === undefined) ttftMs = performance.now() - t0;
+        content += delta;
+        onDelta?.(delta);
+      }
+    }
+  }
+
+  buf += decoder.decode();
+  const parsed = parseSseBuffer(buf);
+  for (const event of parsed.events) {
+    if (event.trim() === "[DONE]") continue;
+    try {
+      const data = JSON.parse(event);
+      if (data.usage) usage = data.usage;
+    } catch {}
+  }
+  return { content, usage, latencyMs: performance.now() - t0, streaming: true, ttftMs };
+}
+
+async function llmWithOptionalStream(messages: Message[], onDelta?: (delta: string) => void): Promise<LlmResult> {
+  if (!LLM_STREAM) return { ...(await llm(messages)), streaming: false };
+  try {
+    return await llmStream(messages, onDelta);
+  } catch {
+    return { ...(await llm(messages)), streaming: false };
+  }
 }
 
 async function browse(url: string): Promise<string> {
@@ -330,19 +409,23 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
   for (let step = 1; step <= MAX_STEPS; step++) {
     const sendable = trimContext(messages);
     let reply: string;
+    let streamed = false;
     try {
-      const r = await llm(sendable);
+      const r = await llmWithOptionalStream(sendable, (delta) => process.stdout.write(delta));
+      streamed = r.streaming === true;
       reply = r.content;
       await logger.log({
         turn, step, model: MODEL, usage: r.usage, latencyMs: r.latencyMs,
         systemChars: messages[0].content.length, baseChars, messages: sendable, reply, tag: "main",
+        streaming: r.streaming, ttftMs: r.ttftMs,
       });
     } catch (e) {
       console.error(`⚠ LLM error: ${(e as Error).message}`);
       return; // back to prompt; do not kill the REPL
     }
     messages.push({ role: "assistant", content: reply });
-    console.log(reply.trim());
+    if (streamed) console.log("");
+    else console.log(reply.trim());
 
     const action = parseAction(reply);
     if (!action || action.kind === "done") {

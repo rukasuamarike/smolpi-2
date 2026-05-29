@@ -12,7 +12,7 @@ LLM_MODEL   ?= gemma-4
 HOST_GW     ?= $(LLM_HOST)
 VM_NAME     := pi-agent-dev
 # Forward host-side config into recipe subshells (run-brain.sh etc. inherit these).
-export LLM_HOST LLM_PORT LLM_URL LLM_MODEL BRAIN_DIR LLAMA_SERVER MODELS_DIR GPU_LAYERS CTX_SIZE
+export LLM_HOST LLM_PORT LLM_URL LLM_MODEL LLM_STREAM BRAIN_DIR LLAMA_SERVER MODELS_DIR GPU_LAYERS CTX_SIZE
 
 .PHONY: doctor setup setup-yes setup-extensions progress-init pack \
         machine-up machine-init machine-snapshot machine-down \
@@ -77,13 +77,13 @@ machine-snapshot:
 	@echo "Future 'make machine-up' boots from this snapshot."
 
 test-brain:
-	smolvm machine exec --name $(VM_NAME) -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -- bun run /app/scripts/test-connection.ts
+	smolvm machine exec --name $(VM_NAME) -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -e LLM_STREAM=$(LLM_STREAM) -- bun run /app/scripts/test-connection.ts
 
 machine-exec:
 	smolvm machine exec --name $(VM_NAME) -it -- /bin/bash
 
 machine-run:
-	smolvm machine exec --name $(VM_NAME) -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -it -- sh /app/scripts/start-agent.sh
+	smolvm machine exec --name $(VM_NAME) -e LLM_URL=$(LLM_URL) -e LLM_MODEL=$(LLM_MODEL) -e LLM_STREAM=$(LLM_STREAM) -it -- sh /app/scripts/start-agent.sh
 
 machine-down:
 	-smolvm machine stop --name $(VM_NAME) 2>/dev/null

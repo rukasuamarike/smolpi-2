@@ -75,6 +75,14 @@ Promote bash/git/text state before custom state machinery. Add a progress-file c
 
 E2E testing shows streaming is not the dominant wall-clock fix for short one-shot/test paths. Host-direct Gemma 4 E4B IQ2_M has ~69ms TTFT and ~103–115 tok/s generation, while `smolvm exec` adds ~125ms per invocation and guest→host round-trip averages ~216ms vs ~92ms host-only. Therefore, prioritize long-running `make machine-run` sessions and span logging over per-exec micro-optimizations. Streaming remains valuable for perceived latency and TTFT observability inside the live agent loop.
 
+### Implemented first slice
+
+- Added no-dependency OpenAI-compatible SSE parsing in `agent/index.ts`.
+- Added `LLM_STREAM` (default on) with automatic fallback to non-streaming if `stream:true` is rejected.
+- Main agent calls stream deltas to stdout while accumulating the final reply for action parsing and JSONL logs.
+- Extended `agent/logger.ts` with `streaming` and `ttft_ms`; `/logs` summarizes streaming calls and avg TTFT.
+- Added regression test: `tests/test_llm_streaming.sh`.
+
 ### Ideal solution
 
 OpenAI-compatible SSE streaming with graceful fallback.

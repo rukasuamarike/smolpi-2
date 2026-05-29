@@ -101,9 +101,10 @@ Every new harness component must declare the model limitation it assumes. If a s
 4. Fall back to non-streaming `llm()` if the server rejects streaming.
 5. Log `streaming: true/false`, TTFT if feasible, and total latency.
 6. Verify:
-   - Interactive mode prints tokens before full completion.
-   - The final accumulated reply is still parsed correctly for `<sh>`, `<browse>`, `<tool>`, and `<done/>`.
-   - `/logs` still reports complete usage when the backend provides it; otherwise logs zeros plus latency.
+   - `tests/test_llm_streaming.sh` covers SSE streaming, action parsing on accumulated streamed content, JSONL `streaming=true` and `ttft_ms`, and fallback to non-streaming when the backend rejects `stream:true`.
+   - Existing native substrate, external brain, and doctor tests stay green.
+
+**Status:** Implemented in commit TBD: no-dependency SSE parser, `LLM_STREAM` default on, fallback path, streamed delta printing, final reply accumulation, and JSONL streaming/TTFT metadata.
 
 **Expected result:** Latency moves to solid L1 and starts toward L2.
 

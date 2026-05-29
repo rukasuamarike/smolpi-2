@@ -111,8 +111,9 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
   finds, `{"describe":…}` shows a schema, `{"tool":…,"args":"{…}"}` calls. Ships wired to `browser39`'s
   server for interactive browsing. Set a server's `directTools` to promote specific tools to first-class.
 - **Soul / persona** — drop persona text into `.pi/APPEND_SYSTEM.md`; it's appended to the system prompt.
-- **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages
-  (post-processable into training data). `/logs` summarizes token efficiency.
+- **/logs** — every LLM call is dumped as JSONL to `~/.pi/agent/logs/` with token usage + messages,
+  streaming mode, and TTFT when available (post-processable into training data). `/logs` summarizes token
+  efficiency and streaming latency.
 - **delegate** — with `AGENT_EXPERIMENTAL=1`, the agent can fan out independent sub-tasks in parallel via
   `<tool name="delegate">{"tasks":[…]}</tool>`; see [`docs/ORCHESTRATION_DESIGN.md`](./docs/ORCHESTRATION_DESIGN.md).
 
@@ -127,6 +128,7 @@ The loop runs **autonomously across steps** until it emits `<done/>`. Each step 
 |-----|---------|---------|
 | `LLM_URL` | `http://127.0.0.1:8080` | brain endpoint |
 | `LLM_MODEL` | `gemma-4` | model id sent to the API |
+| `LLM_STREAM` | `1` | stream OpenAI-compatible SSE responses; falls back to non-streaming if rejected |
 | `GPU_LAYERS` | _(unset)_ | layers to offload (`run-brain.sh`); set `99` for full GPU |
 | `CTX_SIZE` | `4096` | llama.cpp context window (`run-brain.sh`) |
 | `AGENT_MAX_STEPS` | `12` | max autonomous steps per task |
