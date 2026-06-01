@@ -76,6 +76,7 @@ export const capabilities: Capability[] = [
   },
 
   // ── SYSTEM ─────────────────────────────────────────────────
+  // TODO(tool-design): `z` is advertised because the zoxide BINARY exists (check passes), but `z` is a shell FUNCTION defined only in .bashrc.smol, which shell()'s non-interactive `bash -c` never sources — so [sh:z DIR] fails at runtime. Drop this advert or make shell() source the env. (README near-term #5 no advertised-but-broken tools)
   {
     name: "z",
     group: "SYSTEM",

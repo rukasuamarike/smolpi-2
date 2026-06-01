@@ -17,6 +17,7 @@ export type RiskClass = "low" | "medium" | "high";
 export interface ActionRisk {
   intent: ActionIntent;
   riskClass: RiskClass;
+  // TODO(permission): widen this from the auto_allow literal to a decision enum (auto_allow | checkpoint | deny) so high-risk intents (secret_access/filesystem_delete) can trigger a human checkpoint instead of being recorded as allowed. (plan Task 8 "later"; README near-term #8)
   policy: "auto_allow";
   policyReason: string;
 }

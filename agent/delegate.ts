@@ -170,6 +170,7 @@ export async function runConsolidateMemory(messages: Message[], step: number): P
   } catch (e) {
     return `[consolidate_memory: LLM summarization failed — ${(e as Error).message}]`;
   }
+  // TODO(context-memory): if `summary` is empty (LLM returned nothing) this still splices history away into a near-empty Knowledge Block, silently destroying context — return a no-op marker on empty summary instead. (README near-term #4 semantic compaction)
   messages.splice(2, historySlice.length, {
     role: "user",
     content: `[Knowledge Block — step ${step}, ${historySlice.length} messages compacted]\n${summary}`,

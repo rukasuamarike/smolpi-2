@@ -21,6 +21,7 @@ export function trimContext(messages: Message[], budget: number): TrimResult {
   const firstUserIdx = messages.findIndex((m, i) => i > 0 && m.role === "user");
   const firstUser = firstUserIdx >= 0 ? messages[firstUserIdx] : null;
 
+  // TODO(context-memory): when pinned anchors (system + first-user) alone exceed budget, `used` silently overflows with no signal and the returned context stays over budget; add a strictPromptBudget backstop that truncates/elides the first-user task with an explicit over-budget warning. (plan Task 4 step 5; README richer context WITH measurement)
   let used = system.content.length + (firstUser?.content.length ?? 0);
   const tail: Message[] = [];
   for (let i = messages.length - 1; i >= 1; i--) {

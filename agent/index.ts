@@ -24,7 +24,9 @@ const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 12);
 const CTX_CHAR_BUDGET = Number(process.env.CTX_CHAR_BUDGET ?? 16_000);
 // MODEL_CTX_TOKENS should match --ctx-size passed to llama-server (default now 8192).
 // Warn if the prompt budget leaves less than 15% headroom for completion tokens.
+// TODO(context-memory): split budgets into RESERVED_COMPLETION_TOKENS + MAX_PROMPT_CHARS and derive CTX_CHAR_BUDGET = (MODEL_CTX_TOKENS - reserve)*~4 with 20-30% headroom — the completion reserve (LLM_MAX_TOKENS in llm.ts) is never subtracted today. (plan Root issue #2 / Task 7)
 const MODEL_CTX_TOKENS = Number(process.env.MODEL_CTX_TOKENS ?? 8192);
+// TODO(observability): this guard compares a startup CONSTANT to MODEL_CTX_TOKENS*4 and ignores the completion reserve; add a request-time check of the ASSEMBLED prompt size vs (MODEL_CTX_TOKENS - reserve) so real overflow is actually caught. (plan Root issue #2)
 if (CTX_CHAR_BUDGET / (MODEL_CTX_TOKENS * 4) > 0.85) {
   console.warn(`⚠ CTX_CHAR_BUDGET (${CTX_CHAR_BUDGET}) is >85% of MODEL_CTX_TOKENS*4 (${MODEL_CTX_TOKENS * 4}) — raise MODEL_CTX_TOKENS or lower CTX_CHAR_BUDGET`);
 }
@@ -46,6 +48,7 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
     "You work AUTONOMOUSLY across multiple steps: reason, take ONE action, read its result, then continue — until the task is done.",
   );
   lines.push("You have a high-performance Linux toolkit. Prefer these over basic ls/cat for speed.");
+  // TODO(portability): gate the git-first guidance below on `git` being on PATH (add a git capability using the capabilities.ts isAvailable/`which` pattern) so prompt and runtime stay in sync — git can be absent on a minimal/iPhone guest. (README near-term #2 native primitives; north-star hyperportable)
   lines.push("Use native workspace state before inventing custom scaffolding: start substantial repo tasks with `git status --short`, inspect recent work with `git diff` and `git log --oneline -5`, and use `.pi/progress.md` for milestone notes when context may span multiple turns.");
   lines.push("Update `.pi/progress.md` after meaningful milestones with goal, current state, last commands, open risks, and next step; this assumes small models lose task state, so delete/ignore it if evals prove native git history is enough.");
   lines.push("");
@@ -70,6 +73,7 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   if (toolSpecs.length || EXPERIMENTAL) {
     lines.push("## Memory, knowledge & MCP tools");
     lines.push("Call ONE to recall/search prior knowledge, consult the wiki, save a durable fact, or reach an MCP server (the `mcp` tool — e.g. browser39 interactive browsing: click/fill/submit). Skip the memory tools if the answer is already in the context above.");
+    // TODO(ux): add an altitude/escalation rule — answer general knowledge directly, else memory/wiki, else fetch/browse a page (web search once it exists), and reach for interactive browser39 (mcp) ONLY for click/fill/submit. Today this headlines interactive browsing with no cheaper-first ordering. (README near-term #1 boring happy path)
     for (const s of toolSpecs) lines.push(`- ${s.name}(${s.args}) — ${s.description}`);
     if (EXPERIMENTAL) {
       lines.push('- delegate(task, tasks) — run independent sub-task(s) in FRESH isolated contexts; pass tasks:["a","b"] to run them IN PARALLEL. Returns only their distilled results. Use for independent research/exploration that would otherwise bloat this context.');
@@ -115,6 +119,7 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   lines.push("(Note: the second answer SHOWS the command in backticks and runs nothing.)");
   lines.push("");
   lines.push("---");
+  // TODO(reliability): Current Time is frozen at startup inside baseSystem (the cached KV prefix) so it goes stale across a long session; move volatile time to a per-turn tail user message (out of the prefix) to stay accurate without churning the ~93% prefix hit. (README latency + reliability)
   lines.push(`Current Time: ${new Date().toISOString()}`);
   lines.push(`PWD: ${process.cwd()}`);
   lines.push(`OS: ${process.platform} ${process.arch}`);
@@ -132,6 +137,7 @@ async function generatePrompt(host: ExtensionHost): Promise<string> {
   // Pinned rules — loaded from AGENT_RULES_PATH (.pi/AGENT_RULES.md by default).
   // Lives in baseSystem so it is NEVER subject to sliding-window trim. Any rule
   // that must survive a long multi-step session belongs here, not in messages[].
+  // TODO(ux): grow .pi/AGENT_RULES.md (pinned here, survives compaction) with one concrete recovery recipe per common failure — command-not-found → check the capability list; [exit N] → read stderr then retry or explain; never emit <done/> on an unresolved error — to steer the small model toward recovery. (README near-term #5 actionable tool errors)
   const rulesFile = Bun.file(AGENT_RULES_PATH);
   if (await rulesFile.exists()) {
     const rules = (await rulesFile.text()).trim();
@@ -165,12 +171,14 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
   for (let step = 1; step <= MAX_STEPS; step++) {
     const stepSpanId = logger.newSpanId();
     const stepT0 = performance.now();
+    // TODO(observability): this proactive elision pass runs every step with NO span — add a context.compact span (latency, elided count, chars saved) mirroring context.trim so the cost is attributable before optimizing it. (README local span observability / measure before optimizing)
     // Proactively elide old large observations to pointers before the trim runs.
     if (step > 1) {
       const { messages: compacted, elided } = compactLargeObservations(messages);
       if (elided > 0) messages.splice(0, messages.length, ...compacted);
     }
     const trimT0 = performance.now();
+    // TODO(performance): messageChars is an O(n) full-history scan run multiple times per step (here + after-trim + inside trimContext); keep a running char total incrementally so per-step cost stops growing ~O(n^2) as history grows (4-step ~2203ms is context-growth bound). (README latency axis)
     const beforeChars = messageChars(messages);
     const { messages: trimmed, droppedCount } = trimContext(messages, CTX_CHAR_BUDGET);
     const sendable = droppedCount > 0 ? insertCompactionNotice(trimmed, droppedCount) : trimmed;
@@ -254,6 +262,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
         span: "agent.step",
         spanId: stepSpanId,
         latencyMs: performance.now() - stepT0,
+        // TODO(ux): the no_action branch returns with no terminal marker (asymmetric with the "✓ done" print above) — print an explicit line like "(stopped: no action parsed — treating reply as final answer)" so the user knows the turn ended. (README near-term #1 boring happy path)
         metadata: { stop_reason: action?.kind === "done" ? "done" : "no_action" },
       });
       return;
@@ -261,6 +270,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
 
     const permT0 = performance.now();
     const actionRisk = classifyActionRisk(action);
+    // TODO(permission): risk is classified but every action is auto_allow; for high-risk classes (secret_access/filesystem_delete/network_write) add a sparse risk-triggered interactive checkpoint (approve/deny/modify) and feed the decision record back as an observation + trace data. (plan Task 8 "later"; README near-term #8 permission checkpoints as alignment data)
     await logger.logSpan({
       turn,
       step,
@@ -358,6 +368,7 @@ async function runTask(messages: Message[], logger: SessionLogger, turn: number,
   }
 }
 
+// TODO(observability): emit separate startup spans (Bun/module load, host.load extension import, mcp.load manifest, first llm.request) so boot cost is attributable — initHost/agentLoop currently log no startup spans, and the logger is even constructed after initHost(). (plan Task 5 / Root issue #5)
 async function initHost(): Promise<ExtensionHost> {
   const host = new ExtensionHost();
   await host.load();
@@ -403,11 +414,15 @@ async function agentLoop() {
   const active = await activeCapabilities();
   const diag = host.diagnostics();
   console.log(`Connecting to LLM at: ${LLM_URL}`);
+  // TODO(ux): probe LLM_BASE/v1/models at startup and print reachable + served-model id here, instead of letting the first task fail with "⚠ LLM error" after the user already typed it. (README near-term #1 make the happy path boring; reliability)
   console.log(`Model: ${MODEL}  |  max steps/turn: ${MAX_STEPS}  |  ctx budget: ${CTX_CHAR_BUDGET} chars`);
+  // TODO(context-memory): also surface base system-prompt size vs CTX_CHAR_BUDGET here (e.g. "system ~Nk / budget Mk") so the user sees at a glance how much working room a task has — baseSystem.length is in scope. (README near-term #4 richer context WITH measurement)
   console.log(`Capabilities (${active.length}): ${active.map((c) => c.name).join(", ")}`);
   console.log(`Extensions: ${host.summary()}`);
+  // TODO(observability): when diag.failed is non-empty, add a remediation hint (likely missing peer dep / unmounted volume → how to fix) AND surface the degraded state into the system prompt so the model knows a memory/wiki tool is unavailable — today it is a quiet one-liner the model never sees. (README near-term #7 observability + #1 ease of use)
   console.log(`Extension config: ${diag.configPath}${diag.failed.length ? `  ⚠ failed: ${diag.failed.join(", ")}` : ""}`);
   console.log("pi-agent-smol ready. Type a task, /logs for token stats, or 'exit'.");
+  // TODO(ux): add a /help (and /caps or /tools) REPL command listing capabilities + registered tools + failed extensions in-session — today only /logs and 'exit' are handled, so users cannot discover what the agent can do without restarting. Data is already in activeCapabilities()/host.summary()/host.diagnostics(). (README near-term #1 ease of use)
 
   while (true) {
     const input = await prompt("> ");
@@ -447,6 +462,7 @@ async function runOneShot(task: string) {
   }
   const messages: Message[] = [{ role: "system", content: system }];
   const active = await activeCapabilities();
+  // TODO(ux): one-shot banner omits LLM_URL, max-steps, ctx budget and the host.diagnostics() failed-extension line the REPL prints — give one-shot (the scripted/eval path) the same at-a-glance health line so non-interactive failures are diagnosable. (README near-term #1 ease of use; observability)
   console.log(`Model: ${MODEL}  | capabilities: ${active.map((c) => c.name).join(", ")}`);
   console.log(`Extensions: ${host.summary()}`);
   console.log(`[task] ${task}\n`);

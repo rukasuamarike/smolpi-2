@@ -118,10 +118,12 @@ export async function llmWithOptionalStream(messages: Message[], onDelta?: (delt
   }
 }
 
+// TODO(tool-design): add search(query) mirroring browse() via `browser39 search` (+ a WEB/SEARCH capability and a <search> action) — knowledge questions like "creator of linux" currently have no path short of interactively driving browser39 via the mcp proxy. (README near-term #5 tool use that feels real; #2 native primitives)
 export async function browse(url: string): Promise<string> {
   // browser39 `fetch` runs JS (V8), follows the page, and emits token-efficient
   // Markdown directly — no Chromium, no separate readability pass.
   const proc = Bun.spawn([BROWSER_BIN, "fetch", url], { stdout: "pipe", stderr: "pipe" });
+  // TODO(performance): browse buffers the ENTIRE browser39 stdout before truncating to OUT_CAP — bound the read to ~OUT_CAP so large pages don't spike memory/latency in the smol guest. (README "infrastructure headroom before protocol cleverness")
   const stdout = await new Response(proc.stdout).text();
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
@@ -134,6 +136,7 @@ export async function browse(url: string): Promise<string> {
 }
 
 export async function shell(cmd: string, traceEnv: Record<string, string> = {}): Promise<string> {
+  // TODO(tool-design): non-interactive `bash -c` does not source ~/.bashrc.smol, so guest PATH additions, the zoxide `z` function, and aliases (cat→bat, find→fd) are inactive — either source ~/.bashrc.smol here or document that <sh> sees only the base PATH so advertised tools match runtime. (README near-term #5 tool use that feels real)
   const proc = Bun.spawn(["bash", "-c", cmd], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...traceEnv } });
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -141,6 +144,7 @@ export async function shell(cmd: string, traceEnv: Record<string, string> = {}):
     try { proc.kill(); } catch {}
   }, SHELL_TIMEOUT_MS);
 
+  // TODO(performance): shell reads the FULL stdout/stderr into memory before slicing to OUT_CAP — a runaway command can buffer unbounded RAM; cap the read stream at OUT_CAP+margin and stop reading early. (README "infrastructure headroom before protocol cleverness")
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -151,7 +155,9 @@ export async function shell(cmd: string, traceEnv: Record<string, string> = {}):
   let out = stdout.trim();
   if (stderr.trim()) out += `\n[stderr]\n${stderr.trim()}`;
   if (timedOut) out = `[timed out after ${SHELL_TIMEOUT_MS}ms]\n${out}`;
+  // TODO(ux): on non-zero exit, append a terse prescriptive hint (e.g. "— fix the command or explain the failure; do NOT emit <done/> yet") so the small model stops terminating silently on errors. (README "Known model behaviours": bare <done/> on [exit 1]; near-term #5 actionable errors)
   else if (code !== 0) out = `[exit ${code}]\n${out}`;
+  // TODO(context-memory): OUT_CAP truncation slices mid-line/mid-UTF8 and discards the tail entirely — use a line-aware head+tail (first N + last M lines on a code-point boundary) so the model still sees the END of long output. (README near-term #4 richer context windows)
   if (out.length > OUT_CAP) out = out.slice(0, OUT_CAP) + "\n…[truncated]";
   return out.trim() || "(no output)";
 }

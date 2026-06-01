@@ -294,10 +294,12 @@ export class McpBridge {
     }
 
     // search / list
+    // TODO(performance): every search/list (and describe) verb calls connectAll() across ALL servers, re-incurring lazy-connect latency on each discovery call (esp. after idle-disconnect); cache enumerated tools and (re)connect only on demand. (README latency axis; token-efficient tool design)
     const errs = await this.connectAll();
     const kw = typeof p.search === "string" ? p.search.toLowerCase().split(/\s+/).filter(Boolean) : [];
     const lines: string[] = [];
     for (const c of this.servers.values()) {
+      // TODO(tool-design): classify lastError before rendering — spawn ENOENT (binary not installed → name it + "run guest-setup") vs crash-after-connect (-32000 Connection closed → "server started then exited; try {\"connect\":\"name\"} or check stderr") so the model gets an actionable fix, not opaque "-32000". (README near-term #5 actionable tool errors)
       const status = c.connected ? `${c.tools.length} tools` : `OFFLINE${c.lastError ? ` (${c.lastError})` : ""}`;
       lines.push(`## ${c.name} — ${status}`);
       const matches = c.tools.filter((t) => {

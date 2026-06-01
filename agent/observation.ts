@@ -31,6 +31,7 @@ export function compactLargeObservations(
 ): { messages: Message[]; elided: number } {
   let elided = 0;
   const cutoff = messages.length - skipTail;
+  // TODO(performance): this regex-scans the ENTIRE history every step, but only newly-aged messages can newly cross the threshold — bound the scan to the newly-evictable tail so per-step elision is not O(n) as history grows. (README latency axis / richer context with measurement)
   const out = messages.map((m, i) => {
     if (m.role !== "user" || i >= cutoff) return m;
     const match = m.content.match(/^Observation:\n([\s\S]+)$/);
@@ -38,6 +39,7 @@ export function compactLargeObservations(
     elided++;
     return {
       ...m,
+      // TODO(context-memory): this pointer keeps only output-size; the plan's observation ledger also wants the originating command + exit/status retained in-prompt (full raw already goes to the log) so the model recalls WHAT was run. Thread command/status into compaction. (plan Root issue #2)
       content: `Observation:\n[content elided: ${match[1].length} chars — re-run the preceding command to retrieve if needed]`,
     };
   });

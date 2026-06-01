@@ -26,6 +26,7 @@ fi
 
 echo "[3.7/5] Installing browser39 (Rust single binary, no Chromium)..."
 if ! command -v browser39 >/dev/null 2>&1; then
+    # TODO(reliability): browser39 is the agent's "Eyes" but this install is non-fatal (|| echo); a missing/failed install is only noticed inline in the [5/5] verify block or at first <browse>. Print a prominent degraded banner (or fail hard behind an opt-out) so absent Eyes is obvious at provision time. (README near-term #1 boring happy path; hyperportable)
     bun add -g @aquintanar/browser39 || echo "WARN: browser39 install failed; <browse> + MCP browser tools will be unavailable"
     [ -x /root/.bun/bin/browser39 ] && ln -sf /root/.bun/bin/browser39 /usr/local/bin/browser39
 fi

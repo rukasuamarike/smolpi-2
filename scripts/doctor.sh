@@ -122,6 +122,7 @@ else
 fi
 
 echo "── guest VM ──"
+# TODO(ux): add guest-INTERNAL checks via `smolvm machine exec` — git + less present, LANG/LC_ALL=C.UTF-8 set, browser39 on PATH — the failure modes the logs showed live inside the guest but doctor only checks the host. (README near-term #1 ease of use; reliability)
 if smolvm machine ls 2>/dev/null | grep -q 'pi-agent-dev'; then ok "VM 'pi-agent-dev' exists"; else warn "no VM yet" "make machine-up && make machine-init && make machine-snapshot"; fi
 if grep -q '"\./\.pi:/app/\.pi:ro"' Smolfile 2>/dev/null; then
   warn "Smolfile mounts ./.pi read-only" "use \"./.pi:/app/.pi\" so the agent can update .pi/progress.md inside the guest"
